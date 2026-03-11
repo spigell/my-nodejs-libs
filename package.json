@@ -1,0 +1,63 @@
+{
+  "name": "@spigell/my-nodejs-libs",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:spigell/my-nodejs-libs.git"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "node --test --enable-source-maps dist/__tests__/**/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-prometheus": "^0.205.0",
+    "@opentelemetry/sdk-metrics": "^2.1.0",
+    "axios": "^1.8.4",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "uuid": "^11.1.0",
+    "winston": "^3.17.0",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/cors": "^2.8.18",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.10",
+    "@types/node-telegram-bot-api": "^0.64.8",
+    "@types/ws": "^8.5.14",
+    "eslint": "^9.22.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.1"
+  },
+  "packageManager": "yarn@1.22.22"
+}

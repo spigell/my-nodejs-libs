@@ -1,0 +1,21 @@
+name: Package Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  release:
+    uses: spigell/my-shared-workflows/.github/workflows/nodejs-package-release.yaml@main
+    with:
+      working-directory: '.'
+      package-directory: '.'
+      platform: github
+      build-command: |
+        yarn install --frozen-lockfile
+        yarn lint
+        yarn build
+        yarn test
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
