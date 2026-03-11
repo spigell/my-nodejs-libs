@@ -17,6 +17,7 @@ const metrics: Record<string, MetricDefinition> = {
 
 export abstract class PeriodicWorker extends Worker {
   protected interval: number;
+  private cycleTimer: NodeJS.Timeout | undefined;
 
   constructor(
     name: string,
@@ -42,59 +43,63 @@ export abstract class PeriodicWorker extends Worker {
 
     await this.prepare();
 
-    setInterval(() => {
-      if (this.isLocked) {
-        this.logger.warn(
-          'Skipping cycle because a previous scrape is still in progress',
-        );
-        return;
-      }
-
-      this.isLocked = true; // Set the lock
-
-      this.logger.setLabel('runId', this.logger.generateLogId());
-      // this.logger.setLabel('config', config)
-      this.logger.debug('Starting cycle', { name: this.name });
-
-      const startTime = performance.now();
-
-      this.run()
-        .then(() => {
-          this.updateStatus({ ready: true, error: '' });
-        })
-        // All runtime errors should be retryErrors.
-        // Fail if something strange happens.
-        .catch((err: Error) => {
-          this.logger.error(`got error from run()`, {
-            error: err.name,
-            errorMessage: err.message,
-            stack: err.stack,
-            name: this.name,
-          });
-          this.updateStatus({ ready: false, error: err.name });
-        })
-        .finally(() => {
-          const endTime = performance.now();
-          const elapsedTime = endTime - startTime;
-          const duration = elapsedTime / 1000;
-
-          this.isLocked = false; // Release the lock
-
-          this.prom
-            .getPromClient()
-            .updateMetric(
-              this.prom.getMetricBykey(APP_PERIODIC_WORKER_CYCLE_DURATION_KEY)
-                .name,
-              duration,
-              this.getBasicWorkerMetricLabels(),
-            );
-
-          this.logger.debug('Completed cycle', {
-            name: this.name,
-            elapsedTime: `${elapsedTime.toFixed(2)} ms`,
-          });
-        });
+    this.cycleTimer = setInterval(() => {
+      void this.runCycle();
     }, this.interval);
+  }
+
+  public stop(): void {
+    if (this.cycleTimer) {
+      clearInterval(this.cycleTimer);
+      this.cycleTimer = undefined;
+    }
+  }
+
+  private async runCycle(): Promise<void> {
+    if (this.isLocked) {
+      this.logger.warn(
+        'Skipping cycle because a previous scrape is still in progress',
+      );
+      return;
+    }
+
+    this.isLocked = true;
+    this.logger.setLabel('runId', this.logger.generateLogId());
+    this.logger.debug('Starting cycle', { name: this.name });
+
+    const startTime = performance.now();
+
+    try {
+      await this.run();
+      this.updateStatus({ ready: true, error: '' });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`got error from run()`, {
+        error: err.name,
+        errorMessage: err.message,
+        stack: err.stack,
+        name: this.name,
+      });
+      this.updateStatus({ ready: false, error: err.name });
+    } finally {
+      const elapsedTime = performance.now() - startTime;
+      const duration = elapsedTime / 1000;
+
+      this.isLocked = false;
+
+      this.prom
+        .getPromClient()
+        .updateMetric(
+          this.prom.getMetricBykey(APP_PERIODIC_WORKER_CYCLE_DURATION_KEY).name,
+          duration,
+          this.getBasicWorkerMetricLabels(),
+        );
+
+      this.logger.debug('Completed cycle', {
+        name: this.name,
+        elapsedTime: `${elapsedTime.toFixed(2)} ms`,
+      });
+    }
   }
 
   protected abstract prepare(): Promise<void>;

@@ -2,12 +2,16 @@ import type { Meter } from '@opentelemetry/api';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 
+type MetricEntry = {
+  value: number;
+  labels: Record<string, string>;
+};
+
 export class PromClient {
   private exporter: PrometheusExporter;
-  private metricsState: Record<
-    string,
-    { value: number; labels: Record<string, string> }[]
-  > = {};
+  private metricsState = new Map<string, Map<string, MetricEntry>>();
+  private registeredGauges = new Set<string>();
+  private registeredCounters = new Set<string>();
   private meter: Meter;
   private duplicateCounter = 0;
 
@@ -42,11 +46,7 @@ export class PromClient {
     description: string,
     labels: Record<string, string>,
   ): void {
-    const existingMetric = this.metricsState[metricName]?.find((metric) =>
-      this.areLabelsEqual(metric.labels, labels),
-    );
-
-    if (existingMetric) {
+    if (this.hasMetric(metricName, labels)) {
       return;
     }
 
@@ -58,33 +58,27 @@ export class PromClient {
     description: string,
     labels: Record<string, string>,
   ): void {
-    const existingMetric = this.metricsState[metricName]?.find((metric) =>
-      this.areLabelsEqual(metric.labels, labels),
-    );
-
-    if (existingMetric) {
+    const metricsByLabels = this.getMetricsByLabels(metricName);
+    const labelKey = this.getLabelKey(labels);
+    if (metricsByLabels.has(labelKey)) {
       this.duplicateCounter++;
       throw new Error(
         `Duplicate metric registration detected for metricName: ${metricName} with labels: ${JSON.stringify(labels)}`,
       );
     }
 
-    if (!this.metricsState[metricName]) {
-      this.metricsState[metricName] = [];
-    }
+    metricsByLabels.set(labelKey, { value: 0, labels: { ...labels } });
 
-    this.metricsState[metricName].push({ value: 0, labels });
+    if (!this.registeredGauges.has(metricName)) {
+      this.registeredGauges.add(metricName);
+      const gauge = this.meter.createObservableGauge(metricName, { description });
 
-    const gauge = this.meter.createObservableGauge(metricName, { description });
-
-    gauge.addCallback((observableResult) => {
-      const metricDataList = this.metricsState[metricName];
-      if (metricDataList) {
-        for (const metricData of metricDataList) {
+      gauge.addCallback((observableResult) => {
+        for (const metricData of this.getMetricsByLabels(metricName).values()) {
           observableResult.observe(metricData.value, metricData.labels);
         }
-      }
-    });
+      });
+    }
   }
 
   registerObservableCounter(
@@ -92,52 +86,33 @@ export class PromClient {
     description: string,
     labels: Record<string, string>,
   ): void {
-    if (
-      this.metricsState[metricName]?.some((metric) =>
-        this.areLabelsEqual(metric.labels, labels),
-      )
-    ) {
+    const metricsByLabels = this.getMetricsByLabels(metricName);
+    const labelKey = this.getLabelKey(labels);
+    if (metricsByLabels.has(labelKey)) {
       this.duplicateCounter++;
       throw new Error(
         `Duplicate counter registration detected for metricName: ${metricName} with labels: ${JSON.stringify(labels)}`,
       );
     }
 
-    if (!this.metricsState[metricName]) {
-      this.metricsState[metricName] = [];
-    }
+    metricsByLabels.set(labelKey, { value: 0, labels: { ...labels } });
 
-    this.metricsState[metricName].push({ value: 0, labels });
+    if (!this.registeredCounters.has(metricName)) {
+      this.registeredCounters.add(metricName);
+      const counter = this.meter.createObservableCounter(metricName, {
+        description,
+      });
 
-    const counter = this.meter.createObservableCounter(metricName, {
-      description,
-    });
-
-    counter.addCallback((observableResult) => {
-      const metricDataList = this.metricsState[metricName];
-      if (metricDataList) {
-        for (const metricData of metricDataList) {
+      counter.addCallback((observableResult) => {
+        for (const metricData of this.getMetricsByLabels(metricName).values()) {
           observableResult.observe(metricData.value, metricData.labels);
         }
-      }
-    });
+      });
+    }
   }
 
   incrementMetric(metricName: string, labels: Record<string, string>): void {
-    const metricDataList = this.metricsState[metricName];
-    if (!metricDataList) {
-      throw new Error(`Metric with name ${metricName} not found.`);
-    }
-
-    const targetMetric = metricDataList.find((metric) =>
-      this.areLabelsEqual(metric.labels, labels),
-    );
-    if (!targetMetric) {
-      throw new Error(
-        `Metric with name ${metricName} and labels ${JSON.stringify(labels)} not found.`,
-      );
-    }
-
+    const targetMetric = this.getMetric(metricName, labels);
     targetMetric.value += 1;
   }
 
@@ -146,36 +121,50 @@ export class PromClient {
     value: number,
     labels: Record<string, string>,
   ): void {
-    const metricDataList = this.metricsState[metricName];
-    if (!metricDataList) {
+    const targetMetric = this.getMetric(metricName, labels);
+    targetMetric.value = value;
+  }
+
+  getMetricCount(metricName: string): number {
+    return this.metricsState.get(metricName)?.size ?? 0;
+  }
+
+  private hasMetric(metricName: string, labels: Record<string, string>): boolean {
+    return this.getMetricsByLabels(metricName).has(this.getLabelKey(labels));
+  }
+
+  private getMetric(
+    metricName: string,
+    labels: Record<string, string>,
+  ): MetricEntry {
+    const metricsByLabels = this.metricsState.get(metricName);
+    if (!metricsByLabels) {
       throw new Error(`Metric with name ${metricName} not found.`);
     }
 
-    const targetMetric = metricDataList.find((metric) =>
-      this.areLabelsEqual(metric.labels, labels),
-    );
-    if (!targetMetric) {
+    const metric = metricsByLabels.get(this.getLabelKey(labels));
+    if (!metric) {
       throw new Error(
         `Metric with name ${metricName} and labels ${JSON.stringify(labels)} not found.`,
       );
     }
 
-    targetMetric.value = value;
+    return metric;
   }
 
-  getMetricCount(metricName: string): number {
-    const metricDataList = this.metricsState[metricName];
-    return metricDataList ? metricDataList.length : 0;
+  private getMetricsByLabels(metricName: string): Map<string, MetricEntry> {
+    let metricsByLabels = this.metricsState.get(metricName);
+    if (!metricsByLabels) {
+      metricsByLabels = new Map<string, MetricEntry>();
+      this.metricsState.set(metricName, metricsByLabels);
+    }
+    return metricsByLabels;
   }
 
-  private areLabelsEqual(
-    labels1: Record<string, string>,
-    labels2: Record<string, string>,
-  ): boolean {
-    const keys1 = Object.keys(labels1);
-    const keys2 = Object.keys(labels2);
-    if (keys1.length !== keys2.length) return false;
-
-    return keys1.every((key) => labels1[key] === labels2[key]);
+  private getLabelKey(labels: Record<string, string>): string {
+    const entries = Object.entries(labels).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    return JSON.stringify(entries);
   }
 }

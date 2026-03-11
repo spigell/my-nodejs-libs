@@ -1,9 +1,14 @@
-import { MetricRegistry } from '../prometheus-client/metricRegistry.js';
+import type { MetricRegistry } from '../prometheus-client/metricRegistry.js';
 import { Logging } from '../logger/logger.js';
 import { PeriodicWorker } from './periodicWorker.js';
 import { simple } from '../utils/retry.js';
 
-export type QueueTask<T = any> = {
+type QueueTaskPayloadMap = Record<string, unknown>;
+
+const toError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+export type QueueTask<T = unknown> = {
   id: string;
   kind: string;
   payload: T;
@@ -11,7 +16,7 @@ export type QueueTask<T = any> = {
 };
 
 export abstract class QueueWorker<
-  Types extends Record<string, any>,
+  Types extends QueueTaskPayloadMap,
 > extends PeriodicWorker {
   private taskQueue: QueueTask<Types[keyof Types]>[] = [];
   private concurrency: number;
@@ -37,11 +42,12 @@ export abstract class QueueWorker<
     this.handlers = handlers;
   }
 
-  protected async prepare() {
+  protected prepare(): Promise<void> {
     this.logger.info('Worker initialized.');
+    return Promise.resolve();
   }
 
-  protected async run(): Promise<void> {
+  protected run(): Promise<void> {
     this.logger.debug('Getting tasks from queue', {
       length: this.taskQueue.length,
     });
@@ -58,15 +64,18 @@ export abstract class QueueWorker<
 
         action
           .then(() => this.logger.debug('Task completed', { id: task.id }))
-          .catch((err) =>
+          .catch((error: unknown) => {
+            const err = toError(error);
             this.logger.error('Task permanently failed', {
               id: task.id,
               error: err.message,
-            }),
-          )
+            });
+          })
           .finally(() => this.runningTasks--);
       }
     }
+
+    return Promise.resolve();
   }
 
   public enqueueTask<K extends keyof Types>(

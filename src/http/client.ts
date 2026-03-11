@@ -9,35 +9,42 @@ export class JsonAxiosInstance {
     this.client = axios.create({
       baseURL,
       timeout: 5000,
-      validateStatus: (status) => status === 200,
+      validateStatus: (status) => status >= 200 && status < 300,
       headers: {
         'Content-Type': 'application/json',
       },
     });
-
-    this.client.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        return Promise.reject(error);
-      },
-    );
   }
 
-  setHeaders(headers: Record<string, string>) {
+  setHeaders(headers: Record<string, string>): void {
     this.customHeaders = { ...this.customHeaders, ...headers };
   }
 
+  private withHeaders(config?: AxiosRequestConfig): AxiosRequestConfig {
+    return {
+      ...config,
+      headers: {
+        ...this.customHeaders,
+        ...(config?.headers ?? {}),
+      },
+    };
+  }
+
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    const response = await this.client.get<T>(url, config);
+    const response = await this.client.get<T>(url, this.withHeaders(config));
     return response.data;
   }
 
   async post<T>(
     url: string,
-    body: any,
+    body: unknown,
     config?: AxiosRequestConfig,
   ): Promise<T> {
-    const response = await this.client.post<T>(url, body, config);
+    const response = await this.client.post<T>(
+      url,
+      body,
+      this.withHeaders(config),
+    );
     return response.data;
   }
 

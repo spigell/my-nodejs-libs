@@ -16,6 +16,6 @@ export function appInfo() {
   return {
     appVersion,
     environment: process.env.NODE_ENV,
-    proccessId: process.pid,
+    processId: process.pid,
   };
 }

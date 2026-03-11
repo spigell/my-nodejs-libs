@@ -15,11 +15,11 @@ const metrics: Record<string, MetricDefinition> = {
   },
 };
 
-export type WorkerConfig = {};
+export type WorkerConfig = Record<string, unknown>;
 
 export abstract class Worker {
   protected name: string; // Name of the instance
-  protected appId: string = 'change me';
+  protected appId: string;
   protected config: WorkerConfig;
   protected prom: MetricRegistry; // Prometheus client for registering and updating metrics
   protected logger: Logging; // Logger instance for structured logging
@@ -60,10 +60,11 @@ export abstract class Worker {
     return { worker: this.name, app_id: this.appId };
   }
 
-  protected async init(__: FuelWallet, config: WorkerConfig): Promise<void> {
+  protected init(__: FuelWallet, config: WorkerConfig): Promise<void> {
     this.logger.info('worker inited', {
       config,
     });
+    return Promise.resolve();
   }
 
   public getName(): string {

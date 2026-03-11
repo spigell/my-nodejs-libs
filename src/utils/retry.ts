@@ -1,3 +1,11 @@
+const sleep = async (delayMs: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+
+const toError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
 export class RetryError extends Error {
   attempts: number;
   lastError: Error;
@@ -28,7 +36,7 @@ export async function simple<T>(
       const result = await fn(); // Try the provided function
       return { result, tries: attempts }; // Return the result on success
     } catch (error) {
-      lastError = error as Error; // Type assertion for the caught error
+      lastError = toError(error);
       if (attempts >= retries) {
         throw new RetryError(
           `Maximum retries reached (${retries}).`,
@@ -37,7 +45,7 @@ export async function simple<T>(
         );
       }
       // Exponential backoff with delay
-      await new Promise((resolve) => setTimeout(resolve, delay * attempts));
+      await sleep(delay * 2 ** (attempts - 1));
     }
   }
 

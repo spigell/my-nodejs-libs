@@ -12,11 +12,11 @@ export type { Request, Response } from 'express';
 
 export const HTTP_STREAM_ROUTE = '/streams';
 
-enum InternalRoutes {
-  Metrics = '/metrics',
-  Healthz = '/healthz',
-  Streams = '/streams',
-}
+const InternalRoutes = {
+  Metrics: '/metrics',
+  Healthz: '/healthz',
+  Streams: '/streams',
+} as const;
 
 const metrics: Record<string, MetricDefinition> = {
   WS_CONNECTED: {
@@ -29,8 +29,13 @@ const metrics: Record<string, MetricDefinition> = {
 export const X_APP_ID_HEADER = 'x-app-id';
 
 export type WebSocketMessage = {
-  data: any;
+  data: unknown;
   kind: string;
+};
+
+type ManagedServerWebSocket = WebSocket & {
+  appId: string;
+  isAlive: boolean;
 };
 
 export class Server {
@@ -40,6 +45,7 @@ export class Server {
   private prom: PromClient;
   private httpServer: HttpServer;
   private wsServers: Map<string, WebSocketServer>;
+  private wsHeartbeatIntervals = new Map<string, NodeJS.Timeout>();
 
   constructor(app: App) {
     this.app = express();
@@ -94,8 +100,9 @@ export class Server {
     path: string,
     handler: express.RequestHandler,
   ) {
-    if (Object.values(InternalRoutes).some((route) => path === route)) {
-      throw Error(`Refusing to rewrite internal route ${path}`);
+    const internalRoutes = Object.values(InternalRoutes) as readonly string[];
+    if (internalRoutes.includes(path)) {
+      throw new Error(`Refusing to rewrite internal route ${path}`);
     }
 
     this.router[method](path, handler);
@@ -109,7 +116,11 @@ export class Server {
   addWsHandler(
     kind: string,
     ConnectionHandler: (ws: WebSocket, req: express.Request) => void,
-  ) {
+  ): void {
+    if (this.wsServers.has(kind)) {
+      throw new Error(`WebSocket kind '${kind}' is already registered.`);
+    }
+
     const wsServer = new WebSocketServer({ noServer: true });
     this.wsServers.set(kind, wsServer);
 
@@ -118,13 +129,14 @@ export class Server {
     this.prom.registerObservableGauge(metric.name, metric.help, metricLabels);
 
     wsServer.on('connection', (ws, req: express.Request) => {
-      const appId = req.headers[X_APP_ID_HEADER] || 'unknown';
-      (ws as any).appId = appId;
+      const appIdHeader = req.headers[X_APP_ID_HEADER];
+      const appId = typeof appIdHeader === 'string' ? appIdHeader : 'unknown';
+      const managedSocket = ws as ManagedServerWebSocket;
+      managedSocket.appId = appId;
 
-      // Mark client as alive
-      (ws as any).isAlive = true;
+      managedSocket.isAlive = true;
       ws.on('pong', () => {
-        (ws as any).isAlive = true;
+        managedSocket.isAlive = true;
       });
 
       this.logger.info('client connected', {
@@ -135,13 +147,12 @@ export class Server {
 
       ws.on('close', () => {
         this.logger.info('client disconnected', {
-          app: (ws as any).appId,
+          app: managedSocket.appId,
         });
       });
     });
 
-    // Set up keepalive (ping) checks every 3 seconds
-    setInterval(() => {
+    const heartbeatInterval = setInterval(() => {
       this.getPrometheusClient().updateMetric(
         metric.name,
         wsServer.clients.size,
@@ -149,14 +160,18 @@ export class Server {
       );
 
       wsServer.clients.forEach((ws) => {
-        if (!(ws as any).isAlive) {
-          return ws.terminate();
+        const managedSocket = ws as ManagedServerWebSocket;
+        if (!managedSocket.isAlive) {
+          ws.terminate();
+          return;
         }
 
-        (ws as any).isAlive = false;
+        managedSocket.isAlive = false;
         ws.ping();
       });
     }, 3000);
+
+    this.wsHeartbeatIntervals.set(kind, heartbeatInterval);
   }
 
   setInfoMetric(subsystem: string, labels: Record<string, string>) {
@@ -168,7 +183,7 @@ export class Server {
   /**
    * Start the Express and WebSocket server
    */
-  start(port: number) {
+  start(port: number): void {
     this.httpServer.listen(port, () => {});
 
     // Handle WebSocket upgrades for `/streams`
@@ -200,6 +215,29 @@ export class Server {
 
       wsServer.handleUpgrade(request, socket, head, (ws) => {
         wsServer.emit('connection', ws, request);
+      });
+    });
+  }
+
+  stop(): Promise<void> {
+    for (const interval of this.wsHeartbeatIntervals.values()) {
+      clearInterval(interval);
+    }
+    this.wsHeartbeatIntervals.clear();
+
+    for (const wsServer of this.wsServers.values()) {
+      wsServer.clients.forEach((client) => client.terminate());
+      wsServer.close();
+    }
+    this.wsServers.clear();
+
+    return new Promise((resolve, reject) => {
+      this.httpServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
       });
     });
   }
