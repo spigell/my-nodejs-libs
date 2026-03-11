@@ -1,6 +1,6 @@
 {
   "name": "@spigell/my-nodejs-libs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "UNLICENSED",
   "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
   "type": "module",
