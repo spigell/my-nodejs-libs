@@ -22,6 +22,19 @@ void test('createCodexIsolation writes config, roles, env, and requested skills'
   tempDirs.push(tempRoot);
   process.env.CODEX_ISOLATED_HOME_ROOT = tempRoot;
 
+  const sharedCodexHome = path.join(tempRoot, 'shared-codex-home');
+  await fs.mkdir(sharedCodexHome, { recursive: true });
+  await fs.writeFile(
+    path.join(sharedCodexHome, 'auth.json'),
+    '{"tokens":{}}\n',
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(sharedCodexHome, '.credentials.json'),
+    '{"account_id":"test"}\n',
+    'utf8',
+  );
+
   const skillRoot = path.join(tempRoot, 'source-skills');
   const skillNames = [
     'k8s-autoscaling',
@@ -97,6 +110,7 @@ void test('createCodexIsolation writes config, roles, env, and requested skills'
     skillSourceOptions: {
       kubernetesSkillsRoot: skillRoot,
     },
+    sharedCodexHome,
   });
 
   assert.equal(
@@ -128,5 +142,31 @@ void test('createCodexIsolation writes config, roles, env, and requested skills'
   );
   await assert.doesNotReject(
     fs.access(path.join(result.skillsDir, 'k8s-autoscaling', 'SKILL.md')),
+  );
+  assert.equal(result.authPath, path.join(result.isolatedHome, 'auth.json'));
+  assert.equal(
+    await fs.readlink(result.authPath),
+    path.join(sharedCodexHome, 'auth.json'),
+  );
+  assert.equal(
+    await fs.readlink(result.credentialsPath),
+    path.join(sharedCodexHome, '.credentials.json'),
+  );
+});
+
+void test('createCodexIsolation requires shared auth.json', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-isolation-'));
+  tempDirs.push(tempRoot);
+  process.env.CODEX_ISOLATED_HOME_ROOT = tempRoot;
+
+  const sharedCodexHome = path.join(tempRoot, 'shared-codex-home');
+  await fs.mkdir(sharedCodexHome, { recursive: true });
+
+  await assert.rejects(
+    createCodexIsolation({
+      toolName: 'missing-auth',
+      sharedCodexHome,
+    }),
+    /Missing required Codex shared state file "auth\.json"/,
   );
 });

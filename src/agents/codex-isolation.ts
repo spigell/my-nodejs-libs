@@ -31,6 +31,8 @@ export type CodexIsolationContext = {
   configPath: string;
   configContent: string;
   skillsDir: string;
+  authPath: string;
+  credentialsPath: string;
   cleanup: () => Promise<void>;
 };
 
@@ -55,6 +57,19 @@ export type CodexTomlObject = {
 const resolveIsolatedHomeRoot = () =>
   process.env.CODEX_ISOLATED_HOME_ROOT ||
   path.join(os.homedir(), '.agents-home');
+
+const resolveSharedCodexHome = () =>
+  process.env.CODEX_SHARED_HOME ||
+  process.env.CODEX_HOME ||
+  path.join(os.homedir(), '.codex');
+
+const DEFAULT_SHARED_CODEX_STATE_FILES = (
+  process.env.CODEX_SHARED_STATE_FILES ||
+  'auth.json,.credentials.json,installation_id'
+)
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean);
 
 const quoteTomlString = (value: string) => JSON.stringify(value);
 
@@ -150,6 +165,54 @@ async function writeRoleConfigs(
   );
 }
 
+async function linkSharedStateFiles(
+  sharedHome: string,
+  isolatedHome: string,
+  fileNames: readonly string[],
+): Promise<void> {
+  await Promise.all(
+    fileNames.map(async (fileName) => {
+      const sourcePath = path.join(sharedHome, fileName);
+      const targetPath = path.join(isolatedHome, fileName);
+
+      try {
+        await fs.lstat(sourcePath);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          if (fileName === 'auth.json') {
+            throw new Error(
+              `Missing required Codex shared state file "${fileName}" at ${sourcePath}. ` +
+                'Codex authentication could not be linked into the isolated home.',
+              { cause: error },
+            );
+          }
+          return;
+        }
+        throw error;
+      }
+
+      try {
+        const existing = await fs.lstat(targetPath);
+        if (existing.isSymbolicLink()) {
+          const currentTarget = await fs.readlink(targetPath);
+          if (currentTarget === sourcePath) {
+            return;
+          }
+        }
+        await fs.rm(targetPath, { recursive: true, force: true });
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
+      await fs.symlink(sourcePath, targetPath);
+    }),
+  );
+}
+
 export async function createCodexIsolation(args: {
   toolName: string;
   codexConfig?: CodexIsolationConfig | undefined;
@@ -158,6 +221,8 @@ export async function createCodexIsolation(args: {
   additionalWorkspaces?: readonly string[] | undefined;
   extraEnv?: NodeJS.ProcessEnv | undefined;
   skillSourceOptions?: SkillSourceOptions | undefined;
+  sharedCodexHome?: string | undefined;
+  sharedStateFiles?: readonly string[] | undefined;
 }): Promise<CodexIsolationContext> {
   const toolName = args.toolName.trim() || 'tool';
   const isolatedHome = path.join(resolveIsolatedHomeRoot(), 'codex', toolName);
@@ -172,6 +237,11 @@ export async function createCodexIsolation(args: {
   );
 
   await fs.mkdir(isolatedHome, { recursive: true });
+  await linkSharedStateFiles(
+    args.sharedCodexHome ?? resolveSharedCodexHome(),
+    isolatedHome,
+    args.sharedStateFiles ?? DEFAULT_SHARED_CODEX_STATE_FILES,
+  );
   await writeRoleConfigs(
     path.join(isolatedHome, 'roles'),
     args.codexConfig?.roleConfigs ?? {},
@@ -208,6 +278,8 @@ export async function createCodexIsolation(args: {
     configPath,
     configContent,
     skillsDir,
+    authPath: path.join(isolatedHome, 'auth.json'),
+    credentialsPath: path.join(isolatedHome, '.credentials.json'),
     cleanup: async () => undefined,
   };
 }
