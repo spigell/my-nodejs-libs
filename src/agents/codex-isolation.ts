@@ -2,9 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  getSkillSourcesForSet,
-  type IsolatedSkillSet,
-  type SkillSourceOptions,
+  type SkillSource,
   syncIsolatedSkills,
 } from './isolated-skills.js';
 
@@ -216,11 +214,10 @@ async function linkSharedStateFiles(
 export async function createCodexIsolation(args: {
   toolName: string;
   codexConfig?: CodexIsolationConfig | undefined;
-  isolatedSkillSets?: readonly IsolatedSkillSet[] | undefined;
+  skillSources?: readonly SkillSource[] | undefined;
   targetWorkspace?: string | undefined;
   additionalWorkspaces?: readonly string[] | undefined;
   extraEnv?: NodeJS.ProcessEnv | undefined;
-  skillSourceOptions?: SkillSourceOptions | undefined;
   sharedCodexHome?: string | undefined;
   sharedStateFiles?: readonly string[] | undefined;
 }): Promise<CodexIsolationContext> {
@@ -248,10 +245,7 @@ export async function createCodexIsolation(args: {
   );
   await syncIsolatedSkills(
     skillsDir,
-    getSkillSourcesForSet(
-      args.isolatedSkillSets ?? [],
-      args.skillSourceOptions,
-    ),
+    args.skillSources ?? [],
   );
 
   const configContent = buildCodexConfig({

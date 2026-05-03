@@ -106,10 +106,7 @@ void test('createCodexIsolation writes config, roles, env, and requested skills'
     },
     targetWorkspace: '/project',
     additionalWorkspaces: ['/project/reforge/runner', '/project'],
-    isolatedSkillSets: ['kubernetes'],
-    skillSourceOptions: {
-      kubernetesSkillsRoot: skillRoot,
-    },
+    skillSources: [{ rootDir: skillRoot, dirNames: skillNames }],
     sharedCodexHome,
   });
 

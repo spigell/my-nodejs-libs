@@ -2,20 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import test, { afterEach } from 'node:test';
+import test from 'node:test';
 import {
-  getSkillSourcesForSet,
+  resolveSkillSources,
   syncIsolatedSkills,
 } from '../agents/isolated-skills.js';
-
-const originalKubernetesSkillsRoot = process.env.KUBERNETES_SKILLS_ROOT;
-const originalAgentKubernetesSkillsRoot =
-  process.env.AGENT_KUBERNETES_SKILLS_ROOT;
-
-afterEach(() => {
-  process.env.KUBERNETES_SKILLS_ROOT = originalKubernetesSkillsRoot;
-  process.env.AGENT_KUBERNETES_SKILLS_ROOT = originalAgentKubernetesSkillsRoot;
-});
 
 async function createSkillDir(
   rootDir: string,
@@ -101,23 +92,25 @@ void test('syncIsolatedSkills fails when a configured source directory is missin
   );
 });
 
-void test('getSkillSourcesForSet returns no sources by default', () => {
-  assert.deepEqual(getSkillSourcesForSet([]), []);
-  assert.deepEqual(getSkillSourcesForSet(['none']), []);
+void test('resolveSkillSources returns no sources by default', () => {
+  assert.deepEqual(resolveSkillSources({}, []), []);
+  assert.deepEqual(resolveSkillSources({}, ['none']), []);
 });
 
-void test('getSkillSourcesForSet requires an explicit Kubernetes skills root', () => {
-  delete process.env.KUBERNETES_SKILLS_ROOT;
-  delete process.env.AGENT_KUBERNETES_SKILLS_ROOT;
+void test('resolveSkillSources maps a registry entry', () => {
+  const sources = resolveSkillSources(
+    {
+      kubernetes: {
+        rootDir: '/skills',
+        dirNames: ['k8s-core'],
+      },
+    },
+    ['kubernetes'],
+  );
+  assert.equal(sources[0]?.rootDir, '/skills');
+  assert.deepEqual(sources[0]?.dirNames, ['k8s-core']);
+});
 
-  assert.throws(
-    () => getSkillSourcesForSet(['kubernetes']),
-    /requires kubernetesSkillsRoot/,
-  );
-  assert.equal(
-    getSkillSourcesForSet(['kubernetes'], {
-      kubernetesSkillsRoot: '/skills',
-    })[0]?.rootDir,
-    '/skills',
-  );
+void test('resolveSkillSources rejects unknown skill sets', () => {
+  assert.throws(() => resolveSkillSources({}, ['does-not-exist']), /Unknown skill set requested/);
 });

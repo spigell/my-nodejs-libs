@@ -2,9 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  getSkillSourcesForSet,
-  type IsolatedSkillSet,
-  type SkillSourceOptions,
+  type SkillSource,
   syncIsolatedSkills,
 } from './isolated-skills.js';
 
@@ -37,8 +35,7 @@ export async function createGeminiIsolation(args: {
   promptPath?: string | undefined;
   settings?: unknown;
   extraEnv?: NodeJS.ProcessEnv | undefined;
-  isolatedSkillSets?: readonly IsolatedSkillSet[] | undefined;
-  skillSourceOptions?: SkillSourceOptions | undefined;
+  skillSources?: readonly SkillSource[] | undefined;
 }): Promise<GeminiIsolationContext> {
   const agentName = (process.env.AGENT_NAME || 'gemini').trim() || 'gemini';
   const toolName = args.toolName.trim() || 'tool';
@@ -54,10 +51,7 @@ export async function createGeminiIsolation(args: {
   await fs.mkdir(geminiDir, { recursive: true });
   await syncIsolatedSkills(
     skillsDir,
-    getSkillSourcesForSet(
-      args.isolatedSkillSets ?? [],
-      args.skillSourceOptions,
-    ),
+    args.skillSources ?? [],
   );
 
   if (args.promptPath) {
