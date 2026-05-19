@@ -15,11 +15,10 @@ jobs:
     with:
       working-directory: '.'
       package-directory: '.'
-      platform: github
       build-command: |
         yarn install --frozen-lockfile
         yarn lint
         yarn build
         yarn test
     secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      token: ${{ secrets.NPM_TOKEN }}

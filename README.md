@@ -13,14 +13,7 @@ This package currently groups together:
 
 ## Installation
 
-### From GitHub Packages
-
-Add an `.npmrc` with GitHub Packages auth:
-
-```ini
-@spigell:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
+### From npm
 
 Install the package:
 
@@ -109,15 +102,15 @@ yarn test
 
 ## Release flow
 
-This repository is configured to publish to GitHub Packages via the shared workflow in `spigell/my-shared-workflows`.
+This repository is configured to publish to the public npm registry via the shared workflow in `spigell/my-shared-workflows`.
 
 Release steps:
 
 1. Push your changes to the default branch.
 2. Create and push a tag.
-3. GitHub Actions publishes the package to `npm.pkg.github.com`.
+3. GitHub Actions publishes the package to `registry.npmjs.org`.
 
-The release workflow is defined in [.github/workflows/package-release.yaml](/project/my-shared-infra/my-nodejs-libs/.github/workflows/package-release.yaml).
+The release workflow is defined in [.github/workflows/tags-package-release.yaml](/project/my-shared-infra/my-nodejs-libs/.github/workflows/tags-package-release.yaml).
 
 ## Notes and caveats
 

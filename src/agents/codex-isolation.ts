@@ -82,7 +82,9 @@ function renderTomlValue(
   value: CodexTomlPrimitive | readonly CodexTomlPrimitive[],
 ): string {
   if (Array.isArray(value)) {
-    return `[${value.map((entry) => renderTomlValue(entry)).join(', ')}]`;
+    return `[${value
+      .map((entry: CodexTomlPrimitive) => renderTomlValue(entry))
+      .join(', ')}]`;
   }
   if (typeof value === 'string') {
     return quoteTomlString(value);
@@ -274,6 +276,6 @@ export async function createCodexIsolation(args: {
     skillsDir,
     authPath: path.join(isolatedHome, 'auth.json'),
     credentialsPath: path.join(isolatedHome, '.credentials.json'),
-    cleanup: async () => undefined,
+    cleanup: () => Promise.resolve(),
   };
 }

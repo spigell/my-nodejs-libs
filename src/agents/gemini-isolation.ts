@@ -118,6 +118,6 @@ export async function createGeminiIsolation(args: {
     settingsPath,
     oauthCredsPath: path.join(geminiDir, 'oauth_creds.json'),
     tokenOverridePath: process.env.GEMINI_TOKEN_FILE || '/tmp/gemini-token.txt',
-    cleanup: async () => undefined,
+    cleanup: () => Promise.resolve(),
   };
 }
