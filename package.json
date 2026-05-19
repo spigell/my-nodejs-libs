@@ -1,6 +1,6 @@
 {
   "name": "@spigell/my-nodejs-libs",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "UNLICENSED",
   "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
   "type": "module",
@@ -11,7 +11,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "exports": {
     ".": {
