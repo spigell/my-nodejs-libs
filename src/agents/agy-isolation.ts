@@ -133,19 +133,16 @@ async function syncOptionalSharedStateLink(
 }
 
 function resolveSharedGeminiHome(): string {
-  return (
-    process.env.AGY_SHARED_HOME ||
-    process.env.GEMINI_SHARED_HOME ||
-    path.join(os.homedir(), '.gemini')
-  );
+  return path.join(resolveUserHome(), '.gemini');
 }
 
 function resolveIsolatedHomeRoot(): string {
-  return (
-    process.env.AGY_ISOLATED_HOME_ROOT ||
-    process.env.GEMINI_ISOLATED_HOME_ROOT ||
-    path.join(os.homedir(), '.agents-home')
-  );
+  return path.join(resolveUserHome(), '.agents-home');
+}
+
+function resolveUserHome(): string {
+  const home = process.env.HOME?.trim();
+  return home || os.homedir();
 }
 
 function buildAgySettings(settings: unknown, cwd?: string): unknown {

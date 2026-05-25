@@ -8,16 +8,12 @@ import {
   DEFAULT_AGY_MODEL,
 } from '../agents/agy-isolation.js';
 
-const originalAgyIsolatedHomeRoot = process.env.AGY_ISOLATED_HOME_ROOT;
-const originalGeminiSharedHome = process.env.GEMINI_SHARED_HOME;
-const originalAgySharedHome = process.env.AGY_SHARED_HOME;
+const originalHome = process.env.HOME;
 const originalAgentName = process.env.AGENT_NAME;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  process.env.AGY_ISOLATED_HOME_ROOT = originalAgyIsolatedHomeRoot;
-  process.env.GEMINI_SHARED_HOME = originalGeminiSharedHome;
-  process.env.AGY_SHARED_HOME = originalAgySharedHome;
+  process.env.HOME = originalHome;
   process.env.AGENT_NAME = originalAgentName;
   await Promise.all(
     tempDirs
@@ -29,10 +25,11 @@ afterEach(async () => {
 void test('createAgyIsolation writes prompt, config, env, and requested skills', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
   tempDirs.push(tempRoot);
-  process.env.AGY_ISOLATED_HOME_ROOT = tempRoot;
+  const userHome = path.join(tempRoot, 'home');
+  process.env.HOME = userHome;
   process.env.AGENT_NAME = 'agy';
 
-  const sharedGeminiHome = path.join(tempRoot, 'shared-gemini-home');
+  const sharedGeminiHome = path.join(userHome, '.gemini');
   const sharedAgyHome = path.join(sharedGeminiHome, 'antigravity-cli');
   await fs.mkdir(sharedAgyHome, { recursive: true });
   await fs.writeFile(
@@ -40,7 +37,6 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
     'token\n',
     'utf8',
   );
-  process.env.AGY_SHARED_HOME = sharedGeminiHome;
 
   const promptSourcePath = path.join(tempRoot, 'prompt.md');
   await fs.writeFile(promptSourcePath, '# Prompt\n', 'utf8');
@@ -73,7 +69,10 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
     skillSources: [{ rootDir: skillRoot, dirNames: ['k8s-cli'] }],
   });
 
-  assert.equal(result.env.HOME, path.join(tempRoot, 'agy', 'task-runner'));
+  assert.equal(
+    result.env.HOME,
+    path.join(userHome, '.agents-home', 'agy', 'task-runner'),
+  );
   assert.equal(result.env.SSH_CONNECTION, '127.0.0.1 50000 127.0.0.1 22');
   assert.equal(result.env.SSH_CLIENT, '127.0.0.1 50000 22');
   assert.equal(
@@ -102,8 +101,7 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
 void test('createAgyIsolation does not require a shared oauth token', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
   tempDirs.push(tempRoot);
-  process.env.AGY_ISOLATED_HOME_ROOT = tempRoot;
-  process.env.AGY_SHARED_HOME = path.join(tempRoot, 'missing-shared-home');
+  process.env.HOME = path.join(tempRoot, 'home');
 
   const result = await createAgyIsolation({
     toolName: 'no-token',
@@ -115,7 +113,7 @@ void test('createAgyIsolation does not require a shared oauth token', async () =
 void test('createAgyIsolation writes the default model when settings omit it', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
   tempDirs.push(tempRoot);
-  process.env.AGY_ISOLATED_HOME_ROOT = tempRoot;
+  process.env.HOME = path.join(tempRoot, 'home');
 
   const result = await createAgyIsolation({
     toolName: 'default-model',
