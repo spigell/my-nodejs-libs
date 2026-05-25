@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import type { PathLike } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,10 +12,16 @@ import {
 const originalHome = process.env.HOME;
 const originalAgentName = process.env.AGENT_NAME;
 const tempDirs: string[] = [];
+const realLstat = fs.lstat;
+const realReadlink = fs.readlink;
+const realSymlink = fs.symlink;
 
 afterEach(async () => {
   process.env.HOME = originalHome;
   process.env.AGENT_NAME = originalAgentName;
+  fs.lstat = realLstat;
+  fs.readlink = realReadlink;
+  fs.symlink = realSymlink;
   await Promise.all(
     tempDirs
       .splice(0)
@@ -28,15 +35,24 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
   const userHome = path.join(tempRoot, 'home');
   process.env.HOME = userHome;
   process.env.AGENT_NAME = 'agy';
-
-  const sharedGeminiHome = path.join(userHome, '.gemini');
-  const sharedAgyHome = path.join(sharedGeminiHome, 'antigravity-cli');
-  await fs.mkdir(sharedAgyHome, { recursive: true });
-  await fs.writeFile(
-    path.join(sharedAgyHome, 'antigravity-oauth-token'),
-    'token\n',
-    'utf8',
-  );
+  const sharedOauthTokenPath =
+    '/home/ubuntu/.gemini/antigravity-cli/antigravity-oauth-token';
+  const symlinkCalls: Array<{ target: string; path: string }> = [];
+  fs.lstat = (async (targetPath: PathLike) => {
+    if (String(targetPath) === sharedOauthTokenPath) {
+      return {
+        isSymbolicLink: () => false,
+      } as Awaited<ReturnType<typeof realLstat>>;
+    }
+    return realLstat(targetPath);
+  }) as typeof fs.lstat;
+  fs.symlink = (async (target: PathLike, pathArg: PathLike) => {
+    symlinkCalls.push({
+      target: String(target),
+      path: String(pathArg),
+    });
+    return realSymlink(target, pathArg);
+  }) as typeof fs.symlink;
 
   const promptSourcePath = path.join(tempRoot, 'prompt.md');
   await fs.writeFile(promptSourcePath, '# Prompt\n', 'utf8');
@@ -92,9 +108,15 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
   await assert.doesNotReject(
     fs.access(path.join(result.skillsDir, 'k8s-cli', 'SKILL.md')),
   );
+  assert.deepEqual(symlinkCalls, [
+    {
+      target: sharedOauthTokenPath,
+      path: result.oauthTokenPath,
+    },
+  ]);
   assert.equal(
     await fs.readlink(result.oauthTokenPath),
-    path.join(sharedAgyHome, 'antigravity-oauth-token'),
+    sharedOauthTokenPath,
   );
 });
 

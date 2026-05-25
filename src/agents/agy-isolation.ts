@@ -7,6 +7,8 @@ import {
 } from './isolated-skills.js';
 
 export const DEFAULT_AGY_MODEL = 'Gemini 3.5 Flash (Medium)';
+const AGY_SHARED_OAUTH_TOKEN_PATH =
+  '/home/ubuntu/.gemini/antigravity-cli/antigravity-oauth-token';
 
 export type AgyIsolationContext = {
   env: NodeJS.ProcessEnv;
@@ -72,12 +74,7 @@ export async function createAgyIsolation(args: {
     );
   }
 
-  const sharedOauthTokenPath = path.join(
-    resolveSharedGeminiHome(),
-    'antigravity-cli',
-    'antigravity-oauth-token',
-  );
-  await syncOptionalSharedStateLink(sharedOauthTokenPath, oauthTokenPath);
+  await syncOptionalSharedStateLink(AGY_SHARED_OAUTH_TOKEN_PATH, oauthTokenPath);
 
   return {
     env: {
@@ -130,10 +127,6 @@ async function syncOptionalSharedStateLink(
   }
 
   await fs.symlink(sourcePath, targetPath);
-}
-
-function resolveSharedGeminiHome(): string {
-  return path.join(resolveUserHome(), '.gemini');
 }
 
 function resolveIsolatedHomeRoot(): string {
