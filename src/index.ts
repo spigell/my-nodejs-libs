@@ -4,6 +4,8 @@ export * from './app/periodicWorker.js';
 export * from './app/queueWorker.js';
 export * from './app/websocketWorker.js';
 export * from './app/worker.js';
+export * from './agents/agy-adapter.js';
+export * from './agents/agy-isolation.js';
 export * from './agents/cli-runner.js';
 export * from './agents/codex-isolation.js';
 export * from './agents/gemini-isolation.js';

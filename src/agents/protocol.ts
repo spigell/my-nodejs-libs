@@ -9,6 +9,8 @@ export type EngineState = {
   finalResult: unknown;
   lastAssistantText: string;
   sessionId?: string;
+  rawStdout: string;
+  rawStderr: string;
 };
 
 export type EngineOutcome =
@@ -24,11 +26,13 @@ export type CliBuildArgs = {
   prompt: string;
   sessionId?: string;
   model?: string;
+  printTimeoutMs?: number;
   includeDirectories?: readonly string[];
 };
 
 export type CliAdapter = {
   name: string;
+  outputMode?: 'jsonl' | 'text';
   buildCliArgs(args: CliBuildArgs): string[];
   consumeEvent(state: EngineState, event: unknown): void;
   finalize(state: EngineState): EngineOutcome;

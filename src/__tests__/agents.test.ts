@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import process from 'node:process';
 
 import {
+  agyAdapter,
+  CliRunner,
   createJsonlParser,
   geminiAdapter,
+  type CliAdapter,
   type EngineState,
 } from '../index.js';
 
@@ -37,6 +41,8 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
   const state: EngineState = {
     finalResult: null,
     lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
   };
 
   geminiAdapter.consumeEvent(state, {
@@ -66,4 +72,120 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
       cached: 2,
     },
   });
+});
+
+void test('agyAdapter builds print args with timeout and conversation id', () => {
+  assert.deepEqual(
+    agyAdapter.buildCliArgs({
+      prompt: 'Say hello',
+      sessionId: 'conversation-1',
+      printTimeoutMs: 45_000,
+    }),
+    [
+      '--dangerously-skip-permissions',
+      '-p',
+      'Say hello',
+      '--print-timeout',
+      '45000ms',
+      '--conversation',
+      'conversation-1',
+    ],
+  );
+});
+
+void test('agyAdapter finalizes plain stdout output', () => {
+  const state: EngineState = {
+    finalResult: null,
+    lastAssistantText: '',
+    rawStdout: '\nAgy result\n',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(agyAdapter.finalize(state), {
+    ok: true,
+    text: 'Agy result',
+    usage: null,
+  });
+});
+
+void test('agyAdapter rejects empty stdout output', () => {
+  const state: EngineState = {
+    finalResult: null,
+    lastAssistantText: '',
+    rawStdout: ' \n\t ',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(agyAdapter.finalize(state), {
+    ok: false,
+    error: 'Agy command succeeded without producing any stdout output',
+  });
+});
+
+void test('agyAdapter detects interactive login prompts', () => {
+  assert.equal(
+    agyAdapter.inspectRawOutput?.({
+      stream: 'stderr',
+      text: 'Login required. Please visit the browser flow to authenticate.',
+    }),
+    'Agy authentication required. The CLI is waiting for interactive login.',
+  );
+});
+
+void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {
+  const textAdapter: CliAdapter = {
+    name: 'text-fixture',
+    outputMode: 'text',
+    buildCliArgs() {
+      return ['-e', 'process.stdout.write("plain text result\\n")'];
+    },
+    consumeEvent() {},
+    finalize(state) {
+      return {
+        ok: true,
+        text: state.rawStdout.trim(),
+        usage: null,
+      };
+    },
+  };
+
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter: textAdapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+
+  const result = await runner.run('ignored');
+
+  assert.equal(result.text, 'plain text result');
+  assert.deepEqual(result.warnings, []);
+});
+
+void test('CliRunner timeout still applies to text-mode adapters', async () => {
+  const textAdapter: CliAdapter = {
+    name: 'text-timeout',
+    outputMode: 'text',
+    buildCliArgs() {
+      return ['-e', 'setTimeout(() => process.stdout.write("late"), 1000)'];
+    },
+    consumeEvent() {},
+    finalize(state) {
+      return {
+        ok: true,
+        text: state.rawStdout.trim(),
+        usage: null,
+      };
+    },
+  };
+
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter: textAdapter,
+    cwd: process.cwd(),
+    timeoutMs: 50,
+    logger: { info() {} },
+  });
+
+  await assert.rejects(runner.run('ignored'), /timed out after 50ms/);
 });
