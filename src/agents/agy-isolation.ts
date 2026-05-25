@@ -6,6 +6,8 @@ import {
   syncIsolatedSkills,
 } from './isolated-skills.js';
 
+export const DEFAULT_AGY_MODEL = 'Gemini 3.5 Flash (Medium)';
+
 export type AgyIsolationContext = {
   env: NodeJS.ProcessEnv;
   isolatedHome: string;
@@ -25,6 +27,7 @@ export async function createAgyIsolation(args: {
   promptPath?: string | undefined;
   settings?: unknown;
   mcpConfig?: unknown;
+  cwd?: string | undefined;
   extraEnv?: NodeJS.ProcessEnv | undefined;
   skillSources?: readonly SkillSource[] | undefined;
 }): Promise<AgyIsolationContext> {
@@ -57,7 +60,7 @@ export async function createAgyIsolation(args: {
   if (args.settings !== undefined) {
     await fs.writeFile(
       settingsPath,
-      `${JSON.stringify(args.settings, null, 2)}\n`,
+      `${JSON.stringify(buildAgySettings(args.settings, args.cwd), null, 2)}\n`,
       'utf8',
     );
   }
@@ -143,4 +146,31 @@ function resolveIsolatedHomeRoot(): string {
     process.env.GEMINI_ISOLATED_HOME_ROOT ||
     path.join(os.homedir(), '.agents-home')
   );
+}
+
+function buildAgySettings(settings: unknown, cwd?: string): unknown {
+  const base =
+    settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? { ...(settings as Record<string, unknown>) }
+      : {};
+
+  if (typeof base.model !== 'string' || !base.model.trim()) {
+    base.model = DEFAULT_AGY_MODEL;
+  }
+
+  const normalizedCwd = cwd?.trim();
+  if (normalizedCwd) {
+    const existingTrustedWorkspaces = Array.isArray(base.trustedWorkspaces)
+      ? base.trustedWorkspaces.filter(
+          (value): value is string =>
+            typeof value === 'string' && value.trim() !== '',
+        )
+      : [];
+
+    base.trustedWorkspaces = Array.from(
+      new Set([...existingTrustedWorkspaces, normalizedCwd]),
+    );
+  }
+
+  return base;
 }

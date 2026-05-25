@@ -3,7 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { afterEach } from 'node:test';
-import { createAgyIsolation } from '../agents/agy-isolation.js';
+import {
+  createAgyIsolation,
+  DEFAULT_AGY_MODEL,
+} from '../agents/agy-isolation.js';
 
 const originalAgyIsolatedHomeRoot = process.env.AGY_ISOLATED_HOME_ROOT;
 const originalGeminiSharedHome = process.env.GEMINI_SHARED_HOME;
@@ -53,9 +56,11 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
   const result = await createAgyIsolation({
     toolName: 'task-runner',
     promptPath: promptSourcePath,
+    cwd: '/spigell-reforge-ai/my-shared-infra/my-nodejs-libs',
     settings: {
       model: 'Claude Opus 4.6 (Thinking)',
       enableTelemetry: false,
+      trustedWorkspaces: ['/spigell-reforge-ai'],
     },
     mcpConfig: {
       mcpServers: {
@@ -75,7 +80,15 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
     await fs.readFile(result.promptPath, 'utf8'),
     await fs.readFile(promptSourcePath, 'utf8'),
   );
-  assert.match(await fs.readFile(result.settingsPath, 'utf8'), /"model":/);
+  const settingsJson = JSON.parse(await fs.readFile(result.settingsPath, 'utf8')) as {
+    model?: string;
+    trustedWorkspaces?: string[];
+  };
+  assert.equal(settingsJson.model, 'Claude Opus 4.6 (Thinking)');
+  assert.deepEqual(settingsJson.trustedWorkspaces, [
+    '/spigell-reforge-ai',
+    '/spigell-reforge-ai/my-shared-infra/my-nodejs-libs',
+  ]);
   assert.match(await fs.readFile(result.mcpConfigPath, 'utf8'), /"git-mcp":/);
   await assert.doesNotReject(
     fs.access(path.join(result.skillsDir, 'k8s-cli', 'SKILL.md')),
@@ -97,4 +110,26 @@ void test('createAgyIsolation does not require a shared oauth token', async () =
   });
 
   await assert.rejects(fs.lstat(result.oauthTokenPath), /ENOENT/);
+});
+
+void test('createAgyIsolation writes the default model when settings omit it', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
+  tempDirs.push(tempRoot);
+  process.env.AGY_ISOLATED_HOME_ROOT = tempRoot;
+
+  const result = await createAgyIsolation({
+    toolName: 'default-model',
+    cwd: '/spigell-reforge-ai',
+    settings: {
+      enableTelemetry: false,
+    },
+  });
+
+  const settingsJson = JSON.parse(await fs.readFile(result.settingsPath, 'utf8')) as {
+    model?: string;
+    trustedWorkspaces?: string[];
+  };
+
+  assert.equal(settingsJson.model, DEFAULT_AGY_MODEL);
+  assert.deepEqual(settingsJson.trustedWorkspaces, ['/spigell-reforge-ai']);
 });
