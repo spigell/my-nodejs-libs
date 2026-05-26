@@ -56,6 +56,28 @@ export async function createAgyIsolation(args: {
   await fs.mkdir(configDir, { recursive: true });
   await syncIsolatedSkills(skillsDir, args.skillSources ?? []);
 
+  const isolatedSkillsLink = path.join(antigravityCliDir, 'skills');
+  try {
+    const existing = await fs.lstat(isolatedSkillsLink);
+    if (existing.isSymbolicLink()) {
+      const currentTarget = await fs.readlink(isolatedSkillsLink);
+      if (currentTarget !== '../config/skills') {
+        await fs.rm(isolatedSkillsLink, { recursive: true, force: true });
+        await fs.symlink('../config/skills', isolatedSkillsLink);
+      }
+    } else {
+      await fs.rm(isolatedSkillsLink, { recursive: true, force: true });
+      await fs.symlink('../config/skills', isolatedSkillsLink);
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      await fs.symlink('../config/skills', isolatedSkillsLink);
+    } else {
+      throw error;
+    }
+  }
+
   if (args.promptPath) {
     await fs.copyFile(args.promptPath, promptPath);
   }

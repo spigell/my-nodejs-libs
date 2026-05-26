@@ -38,6 +38,7 @@ export type CliRunOptions = {
   includeDirectories?: readonly string[];
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  printTimeoutMs?: number;
 };
 
 export type JsonlParser = {
@@ -82,7 +83,7 @@ export class CliRunner {
     if (normalizedOptions.model !== undefined) {
       buildArgs.model = normalizedOptions.model;
     }
-    buildArgs.printTimeoutMs = timeoutMs;
+    buildArgs.printTimeoutMs = normalizedOptions.printTimeoutMs ?? timeoutMs;
     if (normalizedOptions.includeDirectories !== undefined) {
       buildArgs.includeDirectories = normalizedOptions.includeDirectories;
     }
