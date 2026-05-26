@@ -132,8 +132,8 @@ void test('createAgyIsolation does not require a shared oauth token', async () =
     '/home/ubuntu/.gemini/antigravity-cli/antigravity-oauth-token';
   fs.lstat = (async (targetPath: PathLike) => {
     if (String(targetPath) === sharedOauthTokenPath) {
-      const err = new Error('ENOENT: no such file or directory');
-      (err as any).code = 'ENOENT';
+      const err = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
       throw err;
     }
     return realLstat(targetPath);
