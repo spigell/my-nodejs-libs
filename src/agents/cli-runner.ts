@@ -38,6 +38,7 @@ export type CliRunOptions = {
   includeDirectories?: readonly string[];
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
+  printTimeoutMs?: number;
 };
 
 export type JsonlParser = {
@@ -82,6 +83,7 @@ export class CliRunner {
     if (normalizedOptions.model !== undefined) {
       buildArgs.model = normalizedOptions.model;
     }
+    buildArgs.printTimeoutMs = normalizedOptions.printTimeoutMs ?? timeoutMs;
     if (normalizedOptions.includeDirectories !== undefined) {
       buildArgs.includeDirectories = normalizedOptions.includeDirectories;
     }
@@ -125,17 +127,23 @@ export class CliRunner {
     const state: EngineState = {
       finalResult: null as unknown,
       lastAssistantText: '',
+      rawStdout: '',
+      rawStderr: '',
     };
 
+    const outputMode = this.args.adapter.outputMode ?? 'jsonl';
     const parserWarnings: string[] = [];
-    const parser = createJsonlParser({
-      onLine: (event) => {
-        this.args.adapter.consumeEvent(state, event);
-      },
-      onInvalidLine: (line) => {
-        parserWarnings.push(line);
-      },
-    });
+    const parser =
+      outputMode === 'jsonl'
+        ? createJsonlParser({
+            onLine: (event) => {
+              this.args.adapter.consumeEvent(state, event);
+            },
+            onInvalidLine: (line) => {
+              parserWarnings.push(line);
+            },
+          })
+        : null;
 
     let stderr = '';
     let rawStdoutTail = '';
@@ -163,6 +171,7 @@ export class CliRunner {
     child.stdout.on('data', (chunk) => {
       const text = normalizeChunk(chunk);
       normalizedOptions.onStdout?.(text);
+      state.rawStdout += text;
       rawStdoutTail = appendOutputTail(rawStdoutTail, text);
 
       const inspectionError = this.args.adapter.inspectRawOutput?.({
@@ -175,13 +184,15 @@ export class CliRunner {
         return;
       }
 
-      try {
-        parser.write(chunk);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        stderr = `${this.args.command} stream parse error: ${message}`;
-        abortReason = stderr;
-        child.kill('SIGTERM');
+      if (parser) {
+        try {
+          parser.write(chunk);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          stderr = `${this.args.command} stream parse error: ${message}`;
+          abortReason = stderr;
+          child.kill('SIGTERM');
+        }
       }
     });
 
@@ -189,6 +200,7 @@ export class CliRunner {
       const text = normalizeChunk(chunk);
       normalizedOptions.onStderr?.(text);
       stderr += text;
+      state.rawStderr += text;
       rawStderrTail = appendOutputTail(rawStderrTail, text);
 
       const inspectionError = this.args.adapter.inspectRawOutput?.({
@@ -252,7 +264,7 @@ export class CliRunner {
     }
 
     try {
-      parser.end();
+      parser?.end();
       const outcome = this.args.adapter.finalize(state);
       if (!outcome.ok) {
         throw new Error(formatEngineOutcomeError(this.args.command, outcome));
