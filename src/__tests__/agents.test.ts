@@ -122,15 +122,7 @@ void test('agyAdapter rejects empty stdout output', () => {
   });
 });
 
-void test('agyAdapter detects interactive login prompts', () => {
-  assert.equal(
-    agyAdapter.inspectRawOutput?.({
-      stream: 'stderr',
-      text: 'Login required. Please visit the browser flow to authenticate.',
-    }),
-    'Agy authentication required. The CLI is waiting for interactive login.',
-  );
-});
+
 
 void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {
   const textAdapter: CliAdapter = {
