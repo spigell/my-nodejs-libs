@@ -3,33 +3,7 @@ import type {
   CliBuildArgs,
   EngineOutcome,
   EngineState,
-  RawOutputInspectionArgs,
 } from './protocol.js';
-
-const AGY_AUTH_PATTERNS = [
-  'interactive login required',
-  'login required',
-  'please visit',
-  'verification code',
-  'waiting for authentication',
-  'waiting for login',
-  'sign in',
-  'authenticate',
-];
-
-function inspectAuthPrompt(args: RawOutputInspectionArgs): string | null {
-  const text = args.text.trim();
-  if (!text) {
-    return null;
-  }
-
-  const normalized = text.toLowerCase();
-  if (!AGY_AUTH_PATTERNS.some((pattern) => normalized.includes(pattern))) {
-    return null;
-  }
-
-  return 'Agy authentication required. The CLI is waiting for interactive login.';
-}
 
 export const agyAdapter: CliAdapter = {
   name: 'agy',
@@ -65,8 +39,5 @@ export const agyAdapter: CliAdapter = {
       text,
       usage: null,
     };
-  },
-  inspectRawOutput(args: RawOutputInspectionArgs) {
-    return inspectAuthPrompt(args);
   },
 };
