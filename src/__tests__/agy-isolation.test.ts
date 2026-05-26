@@ -110,6 +110,10 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
   );
   assert.deepEqual(symlinkCalls, [
     {
+      target: '../config/skills',
+      path: path.join(path.dirname(result.oauthTokenPath), 'skills'),
+    },
+    {
       target: sharedOauthTokenPath,
       path: result.oauthTokenPath,
     },
@@ -124,6 +128,16 @@ void test('createAgyIsolation does not require a shared oauth token', async () =
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
   tempDirs.push(tempRoot);
   process.env.HOME = path.join(tempRoot, 'home');
+  const sharedOauthTokenPath =
+    '/home/ubuntu/.gemini/antigravity-cli/antigravity-oauth-token';
+  fs.lstat = (async (targetPath: PathLike) => {
+    if (String(targetPath) === sharedOauthTokenPath) {
+      const err = new Error('ENOENT: no such file or directory');
+      (err as any).code = 'ENOENT';
+      throw err;
+    }
+    return realLstat(targetPath);
+  }) as typeof fs.lstat;
 
   const result = await createAgyIsolation({
     toolName: 'no-token',
