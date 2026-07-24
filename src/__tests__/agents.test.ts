@@ -4,6 +4,7 @@ import process from 'node:process';
 
 import {
   agyAdapter,
+  claudeAdapter,
   CliRunner,
   createJsonlParser,
   geminiAdapter,
@@ -71,6 +72,108 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
       total: 15,
       cached: 2,
     },
+  });
+});
+
+void test('claudeAdapter builds stream JSON args for a resumable run', () => {
+  assert.deepEqual(
+    claudeAdapter.buildCliArgs({
+      prompt: 'Inspect the deployment',
+      sessionId: 'session-claude',
+      model: 'claude-sonnet-4-5',
+      includeDirectories: ['/spigell-reforge-ai', '/third-party'],
+    }),
+    [
+      '--dangerously-skip-permissions',
+      '--print',
+      'Inspect the deployment',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--model',
+      'claude-sonnet-4-5',
+      '--resume',
+      'session-claude',
+      '--add-dir',
+      '/spigell-reforge-ai',
+      '--add-dir',
+      '/third-party',
+    ],
+  );
+});
+
+void test('claudeAdapter finalizes text, session, and cache-aware usage', () => {
+  const state: EngineState = {
+    finalResult: null,
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  claudeAdapter.consumeEvent(state, {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'claude-session-1',
+  });
+  claudeAdapter.consumeEvent(state, {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Intermediate response' }],
+    },
+  });
+  claudeAdapter.consumeEvent(state, {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'Final response',
+    usage: {
+      input_tokens: 10,
+      cache_creation_input_tokens: 4,
+      cache_read_input_tokens: 20,
+      output_tokens: 6,
+    },
+  });
+
+  assert.equal(state.sessionId, 'claude-session-1');
+  assert.deepEqual(claudeAdapter.finalize(state), {
+    ok: true,
+    text: 'Final response',
+    usage: {
+      input: 34,
+      output: 6,
+      total: 40,
+      cached: 20,
+    },
+  });
+});
+
+void test('claudeAdapter detects authentication failures', () => {
+  assert.equal(
+    claudeAdapter.inspectRawOutput?.({
+      stream: 'stderr',
+      text: 'Not logged in. Please run /login to continue.',
+    }),
+    'Claude authentication required. Log in to Claude Code or provide valid Anthropic credentials.',
+  );
+});
+
+void test('claudeAdapter returns terminal errors', () => {
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      result: 'The request was rejected',
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(claudeAdapter.finalize(state), {
+    ok: false,
+    error: 'The request was rejected',
   });
 });
 
