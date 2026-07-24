@@ -124,8 +124,13 @@ function normalizeError(result: Record<string, unknown>): string {
 export const claudeAdapter: CliAdapter = {
   name: 'claude',
   buildCliArgs(args: CliBuildArgs) {
+    if (args.dangerouslySkipPermissions && args.permissionMode) {
+      throw new Error(
+        'Claude CLI args cannot combine dangerouslySkipPermissions with permissionMode',
+      );
+    }
+
     const cliArgs = [
-      '--dangerously-skip-permissions',
       '--print',
       args.prompt,
       '--output-format',
@@ -133,6 +138,19 @@ export const claudeAdapter: CliAdapter = {
       '--verbose',
     ];
 
+    if (args.dangerouslySkipPermissions) {
+      cliArgs.push('--dangerously-skip-permissions');
+    }
+    if (args.permissionMode) {
+      cliArgs.push('--permission-mode', args.permissionMode);
+    }
+    cliArgs.push('--tools', (args.tools ?? []).join(','));
+    if (args.allowedTools && args.allowedTools.length > 0) {
+      cliArgs.push('--allowedTools', args.allowedTools.join(','));
+    }
+    if (args.disallowedTools && args.disallowedTools.length > 0) {
+      cliArgs.push('--disallowedTools', args.disallowedTools.join(','));
+    }
     if (args.model?.trim()) {
       cliArgs.push('--model', args.model.trim());
     }
@@ -141,6 +159,13 @@ export const claudeAdapter: CliAdapter = {
     }
     for (const directory of args.includeDirectories ?? []) {
       cliArgs.push('--add-dir', directory);
+    }
+    if (args.mcpConfigPath) {
+      cliArgs.push(
+        '--mcp-config',
+        args.mcpConfigPath,
+        '--strict-mcp-config',
+      );
     }
 
     return cliArgs;

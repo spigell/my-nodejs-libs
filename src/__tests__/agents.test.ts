@@ -76,20 +76,35 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
 });
 
 void test('claudeAdapter builds stream JSON args for a resumable run', () => {
+  const readOnlyTools = [
+    'Read',
+    'Glob',
+    'Grep',
+    'mcp__github-mcp__search_code',
+  ];
   assert.deepEqual(
     claudeAdapter.buildCliArgs({
       prompt: 'Inspect the deployment',
       sessionId: 'session-claude',
       model: 'claude-sonnet-4-5',
       includeDirectories: ['/spigell-reforge-ai', '/third-party'],
+      mcpConfigPath: '/isolated/claude/classifier/mcp.json',
+      tools: readOnlyTools,
+      allowedTools: readOnlyTools,
+      permissionMode: 'dontAsk',
     }),
     [
-      '--dangerously-skip-permissions',
       '--print',
       'Inspect the deployment',
       '--output-format',
       'stream-json',
       '--verbose',
+      '--permission-mode',
+      'dontAsk',
+      '--tools',
+      'Read,Glob,Grep,mcp__github-mcp__search_code',
+      '--allowedTools',
+      'Read,Glob,Grep,mcp__github-mcp__search_code',
       '--model',
       'claude-sonnet-4-5',
       '--resume',
@@ -98,7 +113,42 @@ void test('claudeAdapter builds stream JSON args for a resumable run', () => {
       '/spigell-reforge-ai',
       '--add-dir',
       '/third-party',
+      '--mcp-config',
+      '/isolated/claude/classifier/mcp.json',
+      '--strict-mcp-config',
     ],
+  );
+});
+
+void test('claudeAdapter disables all tools for a classifier', () => {
+  const cliArgs = claudeAdapter.buildCliArgs({
+    prompt: 'Classify this untrusted message',
+    permissionMode: 'dontAsk',
+  });
+
+  assert.deepEqual(cliArgs, [
+    '--print',
+    'Classify this untrusted message',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'dontAsk',
+    '--tools',
+    '',
+  ]);
+  assert.doesNotMatch(cliArgs.join(' '), /dangerously-skip-permissions/);
+});
+
+void test('claudeAdapter rejects conflicting permission options', () => {
+  assert.throws(
+    () =>
+      claudeAdapter.buildCliArgs({
+        prompt: 'Run',
+        dangerouslySkipPermissions: true,
+        permissionMode: 'dontAsk',
+      }),
+    /cannot combine dangerouslySkipPermissions with permissionMode/,
   );
 });
 

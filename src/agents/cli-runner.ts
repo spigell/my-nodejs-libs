@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {
   CliAdapter,
   CliBuildArgs,
+  CliPermissionMode,
   EngineOutcome,
   EngineState,
   TokenUsage,
@@ -36,6 +37,12 @@ export type CliRunOptions = {
   model?: string;
   signal?: AbortSignal;
   includeDirectories?: readonly string[];
+  mcpConfigPath?: string;
+  tools?: readonly string[];
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
+  permissionMode?: CliPermissionMode;
+  dangerouslySkipPermissions?: boolean;
   onStdout?: (chunk: string) => void;
   onStderr?: (chunk: string) => void;
   printTimeoutMs?: number;
@@ -86,6 +93,25 @@ export class CliRunner {
     buildArgs.printTimeoutMs = normalizedOptions.printTimeoutMs ?? timeoutMs;
     if (normalizedOptions.includeDirectories !== undefined) {
       buildArgs.includeDirectories = normalizedOptions.includeDirectories;
+    }
+    if (normalizedOptions.mcpConfigPath !== undefined) {
+      buildArgs.mcpConfigPath = normalizedOptions.mcpConfigPath;
+    }
+    if (normalizedOptions.tools !== undefined) {
+      buildArgs.tools = normalizedOptions.tools;
+    }
+    if (normalizedOptions.allowedTools !== undefined) {
+      buildArgs.allowedTools = normalizedOptions.allowedTools;
+    }
+    if (normalizedOptions.disallowedTools !== undefined) {
+      buildArgs.disallowedTools = normalizedOptions.disallowedTools;
+    }
+    if (normalizedOptions.permissionMode !== undefined) {
+      buildArgs.permissionMode = normalizedOptions.permissionMode;
+    }
+    if (normalizedOptions.dangerouslySkipPermissions !== undefined) {
+      buildArgs.dangerouslySkipPermissions =
+        normalizedOptions.dangerouslySkipPermissions;
     }
     const cliArgs = this.args.adapter.buildCliArgs(buildArgs);
 

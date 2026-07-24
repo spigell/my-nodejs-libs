@@ -22,12 +22,24 @@ export type RawOutputInspectionArgs = {
   text: string;
 };
 
+export type CliPermissionMode =
+  | 'default'
+  | 'acceptEdits'
+  | 'dontAsk'
+  | 'plan';
+
 export type CliBuildArgs = {
   prompt: string;
   sessionId?: string;
   model?: string;
   printTimeoutMs?: number;
   includeDirectories?: readonly string[];
+  mcpConfigPath?: string;
+  tools?: readonly string[];
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
+  permissionMode?: CliPermissionMode;
+  dangerouslySkipPermissions?: boolean;
 };
 
 export type CliAdapter = {

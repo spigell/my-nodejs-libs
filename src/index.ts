@@ -7,6 +7,7 @@ export * from './app/worker.js';
 export * from './agents/agy-adapter.js';
 export * from './agents/agy-isolation.js';
 export * from './agents/claude-adapter.js';
+export * from './agents/claude-isolation.js';
 export * from './agents/claude-usage.js';
 export * from './agents/cli-runner.js';
 export * from './agents/codex-isolation.js';
