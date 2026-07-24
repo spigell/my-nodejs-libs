@@ -90,6 +90,115 @@ import {
 
 Do not import from `src/` in consumers. Published output comes from `dist/`.
 
+## Isolated Claude execution
+
+Use `createClaudeIsolation` to give each Claude role its own prompt, settings,
+skills, and MCP configuration while sharing only the Claude Code OAuth
+credentials required for authentication.
+
+```ts
+import {
+  claudeAdapter,
+  CliRunner,
+  createClaudeIsolation,
+  getClaudeUsage,
+} from '@spigell/my-nodejs-libs';
+
+const isolation = await createClaudeIsolation({
+  toolName: 'investigator',
+  promptPath: '/app/prompts/investigator.md',
+  settings: {
+    model: 'claude-opus-4-8',
+  },
+  mcpConfig: {
+    mcpServers: {
+      'github-mcp': {
+        type: 'http',
+        url: 'http://github-mcp:8080/mcp',
+      },
+    },
+  },
+  skillSources: [
+    {
+      rootDir: '/app/skills',
+      dirNames: ['repo-reader'],
+    },
+  ],
+  agentSource: {
+    rootDir:
+      '/spigell-reforge-ai/my-shared-infra/my-agents/agents/claude/agents',
+    names: ['researcher'],
+  },
+});
+
+try {
+  const runner = new CliRunner({
+    command: 'claude',
+    adapter: claudeAdapter,
+    cwd: '/workspace',
+    env: isolation.env,
+  });
+
+  const firstRun = await runner.run('Investigate the failing workflow.', {
+    mcpConfigPath: isolation.mcpConfigPath,
+    permissionMode: 'dontAsk',
+    tools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__github-mcp__search_code',
+    ],
+    allowedTools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__github-mcp__search_code',
+    ],
+  });
+  console.log(firstRun.text, firstRun.tokenUsage);
+
+  const resumedRun = await runner.run('Check the proposed fix.', {
+    sessionId: firstRun.sessionId,
+    mcpConfigPath: isolation.mcpConfigPath,
+    permissionMode: 'dontAsk',
+    tools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__github-mcp__search_code',
+    ],
+    allowedTools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__github-mcp__search_code',
+    ],
+  });
+  console.log(resumedRun.text, resumedRun.tokenUsage);
+
+  const quotaUsage = await getClaudeUsage({
+    credentialsPath: isolation.credentialsPath,
+  });
+  console.log(quotaUsage.five_hour, quotaUsage.seven_day);
+} finally {
+  await isolation.cleanup();
+}
+```
+
+Isolation is ephemeral by default. `cleanup()` recursively removes its unique
+config directory and can be called more than once. Set `persistent: true` when
+the same tool must resume Claude sessions across separate isolation lifetimes;
+in persistent mode the path is stable and `cleanup()` intentionally preserves
+its state.
+
+For untrusted classifier input, do not configure MCP servers, skills, or
+subagents, and run with `tools: []` plus `permissionMode: 'dontAsk'`. Supplying
+an empty tool list emits `--tools ""`, which disables Claude's built-in tools.
+Investigators should receive an explicit allowlist of read-only built-in and
+MCP tool names. Permission bypass is available only through the explicit
+`dangerouslySkipPermissions: true` option and must not be used for untrusted
+content.
+
 ## Development commands
 
 ```bash
