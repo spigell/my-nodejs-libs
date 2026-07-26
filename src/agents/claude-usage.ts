@@ -1,9 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 export const CLAUDE_USAGE_ENDPOINT =
   'https://api.anthropic.com/api/oauth/usage';
+export const CLAUDE_TOKEN_REFRESH_ENDPOINT =
+  'https://platform.claude.com/v1/oauth/token';
+export const CLAUDE_CODE_OAUTH_CLIENT_ID =
+  '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
 export type ClaudeUsageWindow = {
   utilization: number;
@@ -51,36 +56,79 @@ export type GetClaudeUsageOptions = {
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
   userAgent?: string;
+  refreshEndpoint?: string;
+  oauthClientId?: string;
+  refreshBeforeExpiryMs?: number;
 };
 
-type ClaudeCredentials = {
-  claudeAiOauth?: {
-    accessToken?: unknown;
-  };
+type JsonObject = Record<string, unknown>;
+
+type ClaudeOAuthCredentials = {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
 };
+
+type LoadedClaudeCredentials = {
+  document: JsonObject;
+  oauthDocument: JsonObject;
+  oauth: ClaudeOAuthCredentials;
+  resolvedPath: string;
+};
+
+const DEFAULT_REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000;
+const inFlightCredentialRefreshes = new Map<
+  string,
+  Promise<LoadedClaudeCredentials>
+>();
 
 export async function getClaudeUsage(
   options: GetClaudeUsageOptions = {},
 ): Promise<ClaudeUsage> {
-  const accessToken =
-    options.accessToken?.trim() ||
-    (await readClaudeAccessToken(options.credentialsPath));
   const fetchImplementation = options.fetch ?? globalThis.fetch;
-  const response = await fetchImplementation(
-    options.endpoint ?? CLAUDE_USAGE_ENDPOINT,
-    {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'content-type': 'application/json',
-        'user-agent': options.userAgent?.trim() || 'claude-code/2.1.0',
-      },
-      ...(options.signal ? { signal: options.signal } : {}),
-    },
-  );
+  const explicitAccessToken = options.accessToken?.trim();
+  let credentials = explicitAccessToken
+    ? null
+    : await readClaudeCredentials(options.credentialsPath);
+  if (
+    credentials &&
+    shouldRefreshCredentials(
+      credentials.oauth,
+      options.refreshBeforeExpiryMs ?? DEFAULT_REFRESH_BEFORE_EXPIRY_MS,
+    )
+  ) {
+    credentials = await refreshClaudeCredentials({
+      credentials,
+      fetchImplementation,
+      options,
+      force: false,
+    });
+  }
 
+  let accessToken = explicitAccessToken || credentials?.oauth.accessToken;
+  if (!accessToken) {
+    throw new Error('Claude OAuth access token is unavailable');
+  }
+  let response = await requestClaudeUsage(
+    fetchImplementation,
+    accessToken,
+    options,
+  );
+  if (response.status === 401 && credentials) {
+    await response.body?.cancel();
+    credentials = await refreshClaudeCredentials({
+      credentials,
+      fetchImplementation,
+      options,
+      force: true,
+    });
+    accessToken = credentials.oauth.accessToken;
+    response = await requestClaudeUsage(
+      fetchImplementation,
+      accessToken,
+      options,
+    );
+  }
   if (!response.ok) {
     const detail = await readResponseError(response);
     throw new Error(
@@ -97,36 +145,263 @@ export function resolveClaudeCredentialsPath(): string {
   return path.join(configDir, '.credentials.json');
 }
 
-async function readClaudeAccessToken(
+async function readClaudeCredentials(
   credentialsPath = resolveClaudeCredentialsPath(),
-): Promise<string> {
+): Promise<LoadedClaudeCredentials> {
+  let resolvedPath: string;
+  try {
+    resolvedPath = await fs.realpath(credentialsPath);
+  } catch (error) {
+    throw new Error(
+      `Unable to resolve Claude credentials at ${credentialsPath}`,
+      {
+        cause: error,
+      },
+    );
+  }
+
   let content: string;
   try {
-    content = await fs.readFile(credentialsPath, 'utf8');
+    content = await fs.readFile(resolvedPath, 'utf8');
   } catch (error) {
-    throw new Error(`Unable to read Claude credentials at ${credentialsPath}`, {
+    throw new Error(`Unable to read Claude credentials at ${resolvedPath}`, {
       cause: error,
     });
   }
 
-  let credentials: ClaudeCredentials;
+  let document: JsonObject;
   try {
-    credentials = JSON.parse(content) as ClaudeCredentials;
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('credentials root must be an object');
+    }
+    document = parsed as JsonObject;
   } catch (error) {
     throw new Error(
-      `Claude credentials at ${credentialsPath} are not valid JSON`,
+      `Claude credentials at ${resolvedPath} are not valid JSON`,
       { cause: error },
     );
   }
 
-  const accessToken = credentials.claudeAiOauth?.accessToken;
+  const oauthValue = document.claudeAiOauth;
+  if (
+    !oauthValue ||
+    typeof oauthValue !== 'object' ||
+    Array.isArray(oauthValue)
+  ) {
+    throw new Error(
+      `Claude credentials at ${resolvedPath} do not contain a claudeAiOauth object`,
+    );
+  }
+  const oauthDocument = oauthValue as JsonObject;
+  const accessToken = oauthDocument.accessToken;
   if (typeof accessToken !== 'string' || !accessToken.trim()) {
     throw new Error(
-      `Claude credentials at ${credentialsPath} do not contain claudeAiOauth.accessToken`,
+      `Claude credentials at ${resolvedPath} do not contain claudeAiOauth.accessToken`,
     );
   }
 
-  return accessToken.trim();
+  const refreshToken =
+    typeof oauthDocument.refreshToken === 'string' &&
+    oauthDocument.refreshToken.trim()
+      ? oauthDocument.refreshToken.trim()
+      : undefined;
+  const expiresAt =
+    typeof oauthDocument.expiresAt === 'number' &&
+    Number.isFinite(oauthDocument.expiresAt)
+      ? oauthDocument.expiresAt
+      : undefined;
+
+  return {
+    document,
+    oauthDocument,
+    oauth: {
+      accessToken: accessToken.trim(),
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+    },
+    resolvedPath,
+  };
+}
+
+function shouldRefreshCredentials(
+  credentials: ClaudeOAuthCredentials,
+  refreshBeforeExpiryMs: number,
+): boolean {
+  if (credentials.expiresAt === undefined) {
+    return false;
+  }
+  if (!Number.isFinite(refreshBeforeExpiryMs) || refreshBeforeExpiryMs < 0) {
+    throw new Error('refreshBeforeExpiryMs must be a non-negative number');
+  }
+
+  return credentials.expiresAt <= Date.now() + refreshBeforeExpiryMs;
+}
+
+async function requestClaudeUsage(
+  fetchImplementation: typeof globalThis.fetch,
+  accessToken: string,
+  options: GetClaudeUsageOptions,
+): Promise<Response> {
+  return fetchImplementation(options.endpoint ?? CLAUDE_USAGE_ENDPOINT, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${accessToken}`,
+      'anthropic-beta': 'oauth-2025-04-20',
+      'content-type': 'application/json',
+      'user-agent': options.userAgent?.trim() || 'claude-code/2.1.0',
+    },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+}
+
+async function refreshClaudeCredentials(args: {
+  credentials: LoadedClaudeCredentials;
+  fetchImplementation: typeof globalThis.fetch;
+  options: GetClaudeUsageOptions;
+  force: boolean;
+}): Promise<LoadedClaudeCredentials> {
+  const existing = inFlightCredentialRefreshes.get(
+    args.credentials.resolvedPath,
+  );
+  if (existing) {
+    return existing;
+  }
+
+  const refresh = performClaudeCredentialRefresh(args).finally(() => {
+    inFlightCredentialRefreshes.delete(args.credentials.resolvedPath);
+  });
+  inFlightCredentialRefreshes.set(args.credentials.resolvedPath, refresh);
+  return refresh;
+}
+
+async function performClaudeCredentialRefresh(args: {
+  credentials: LoadedClaudeCredentials;
+  fetchImplementation: typeof globalThis.fetch;
+  options: GetClaudeUsageOptions;
+  force: boolean;
+}): Promise<LoadedClaudeCredentials> {
+  const latest = await readClaudeCredentials(args.credentials.resolvedPath);
+  const tokenChanged =
+    latest.oauth.accessToken !== args.credentials.oauth.accessToken;
+  if (
+    tokenChanged ||
+    (!args.force &&
+      !shouldRefreshCredentials(
+        latest.oauth,
+        args.options.refreshBeforeExpiryMs ?? DEFAULT_REFRESH_BEFORE_EXPIRY_MS,
+      ))
+  ) {
+    return latest;
+  }
+
+  const refreshToken = latest.oauth.refreshToken;
+  if (!refreshToken) {
+    throw new Error(
+      `Claude credentials at ${latest.resolvedPath} are expired or unauthorized and do not contain claudeAiOauth.refreshToken`,
+    );
+  }
+
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id:
+      args.options.oauthClientId?.trim() || CLAUDE_CODE_OAUTH_CLIENT_ID,
+  });
+  const response = await args.fetchImplementation(
+    args.options.refreshEndpoint ?? CLAUDE_TOKEN_REFRESH_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      ...(args.options.signal ? { signal: args.options.signal } : {}),
+    },
+  );
+  if (!response.ok) {
+    const detail = await readResponseError(response);
+    throw new Error(
+      `Claude OAuth token refresh failed with HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
+    );
+  }
+
+  const refreshed = normalizeRefreshResponse(await response.json());
+  const refreshedOauthDocument: JsonObject = {
+    ...latest.oauthDocument,
+    accessToken: refreshed.accessToken,
+    refreshToken: refreshed.refreshToken ?? refreshToken,
+    expiresAt: Date.now() + refreshed.expiresIn * 1000,
+  };
+  const refreshedDocument: JsonObject = {
+    ...latest.document,
+    claudeAiOauth: refreshedOauthDocument,
+  };
+  await writeClaudeCredentials(latest.resolvedPath, refreshedDocument);
+
+  return readClaudeCredentials(latest.resolvedPath);
+}
+
+function normalizeRefreshResponse(value: unknown): {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn: number;
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Claude OAuth token refresh response must be an object');
+  }
+
+  const response = value as JsonObject;
+  if (
+    typeof response.access_token !== 'string' ||
+    !response.access_token.trim()
+  ) {
+    throw new Error(
+      'Claude OAuth token refresh response does not contain access_token',
+    );
+  }
+  if (
+    typeof response.expires_in !== 'number' ||
+    !Number.isFinite(response.expires_in) ||
+    response.expires_in <= 0
+  ) {
+    throw new Error(
+      'Claude OAuth token refresh response does not contain a positive expires_in',
+    );
+  }
+
+  const refreshToken =
+    typeof response.refresh_token === 'string' && response.refresh_token.trim()
+      ? response.refresh_token.trim()
+      : undefined;
+  return {
+    accessToken: response.access_token.trim(),
+    expiresIn: response.expires_in,
+    ...(refreshToken ? { refreshToken } : {}),
+  };
+}
+
+async function writeClaudeCredentials(
+  credentialsPath: string,
+  document: JsonObject,
+): Promise<void> {
+  const stats = await fs.stat(credentialsPath);
+  const tempPath = path.join(
+    path.dirname(credentialsPath),
+    `.${path.basename(credentialsPath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+
+  try {
+    await fs.writeFile(tempPath, `${JSON.stringify(document, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: stats.mode & 0o777,
+    });
+    await fs.rename(tempPath, credentialsPath);
+  } finally {
+    await fs.rm(tempPath, { force: true });
+  }
 }
 
 function normalizeClaudeUsage(value: unknown): ClaudeUsage {

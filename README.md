@@ -142,18 +142,8 @@ try {
   const firstRun = await runner.run('Investigate the failing workflow.', {
     mcpConfigPath: isolation.mcpConfigPath,
     permissionMode: 'dontAsk',
-    tools: [
-      'Read',
-      'Glob',
-      'Grep',
-      'mcp__github-mcp__search_code',
-    ],
-    allowedTools: [
-      'Read',
-      'Glob',
-      'Grep',
-      'mcp__github-mcp__search_code',
-    ],
+    tools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
+    allowedTools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
   });
   console.log(firstRun.text, firstRun.tokenUsage);
 
@@ -161,18 +151,8 @@ try {
     sessionId: firstRun.sessionId,
     mcpConfigPath: isolation.mcpConfigPath,
     permissionMode: 'dontAsk',
-    tools: [
-      'Read',
-      'Glob',
-      'Grep',
-      'mcp__github-mcp__search_code',
-    ],
-    allowedTools: [
-      'Read',
-      'Glob',
-      'Grep',
-      'mcp__github-mcp__search_code',
-    ],
+    tools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
+    allowedTools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
   });
   console.log(resumedRun.text, resumedRun.tokenUsage);
 
@@ -184,6 +164,14 @@ try {
   await isolation.cleanup();
 }
 ```
+
+`getClaudeUsage()` reads the Claude Code OAuth credential document. When
+`claudeAiOauth.expiresAt` is near expiry, or when the usage endpoint returns
+HTTP 401, it refreshes with `claudeAiOauth.refreshToken`, atomically persists
+rotated tokens to the real shared credential file behind the isolation
+symlink, and retries usage once. Concurrent refreshes for the same credential
+file are coalesced within the process. Passing an explicit `accessToken`
+disables credential-file refresh and persistence.
 
 Isolation is ephemeral by default. `cleanup()` recursively removes its unique
 config directory and can be called more than once. Set `persistent: true` when
