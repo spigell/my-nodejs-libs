@@ -1,10 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  type SkillSource,
-  syncIsolatedSkills,
-} from './isolated-skills.js';
+import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
 
 export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type CodexColorMode = 'never' | 'auto' | 'always';
@@ -245,10 +242,7 @@ export async function createCodexIsolation(args: {
     path.join(isolatedHome, 'roles'),
     args.codexConfig?.roleConfigs ?? {},
   );
-  await syncIsolatedSkills(
-    skillsDir,
-    args.skillSources ?? [],
-  );
+  await syncIsolatedSkills(skillsDir, args.skillSources ?? []);
 
   const configContent = buildCodexConfig({
     model: args.codexConfig?.model ?? 'gpt-5.5',

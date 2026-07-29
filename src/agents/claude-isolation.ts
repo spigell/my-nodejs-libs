@@ -2,10 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-  type SkillSource,
-  syncIsolatedSkills,
-} from './isolated-skills.js';
+import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
 
 export type ClaudeIsolationContext = {
   env: NodeJS.ProcessEnv;
@@ -45,10 +42,7 @@ export async function createClaudeIsolation(args: {
 }): Promise<ClaudeIsolationContext> {
   const toolName = normalizeSafeName(args.toolName, 'toolName');
   const persistent = args.persistent ?? false;
-  const claudeIsolationRoot = path.join(
-    resolveIsolatedHomeRoot(),
-    'claude',
-  );
+  const claudeIsolationRoot = path.join(resolveIsolatedHomeRoot(), 'claude');
   const agentNames = normalizeAgentNames(args.agentSource);
 
   await fs.mkdir(claudeIsolationRoot, { recursive: true });
@@ -147,26 +141,18 @@ function normalizeSafeName(value: string, fieldName: string): string {
   return normalized;
 }
 
-function normalizeAgentNames(
-  source: ClaudeAgentSource | undefined,
-): string[] {
+function normalizeAgentNames(source: ClaudeAgentSource | undefined): string[] {
   if (!source) {
     return [];
   }
 
   return Array.from(
-    new Set(
-      source.names.map((name) => normalizeSafeName(name, 'agent name')),
-    ),
+    new Set(source.names.map((name) => normalizeSafeName(name, 'agent name'))),
   );
 }
 
 async function writeJson(targetPath: string, value: unknown): Promise<void> {
-  await fs.writeFile(
-    targetPath,
-    `${JSON.stringify(value, null, 2)}\n`,
-    'utf8',
-  );
+  await fs.writeFile(targetPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
 async function linkSharedCredentials(

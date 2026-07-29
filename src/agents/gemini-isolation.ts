@@ -1,10 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  type SkillSource,
-  syncIsolatedSkills,
-} from './isolated-skills.js';
+import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
 
 const DEFAULT_SHARED_GEMINI_HOME =
   process.env.GEMINI_SHARED_HOME || path.join(os.homedir(), '.gemini');
@@ -49,10 +46,7 @@ export async function createGeminiIsolation(args: {
   const systemPromptPath = path.join(geminiDir, 'system.md');
   const settingsPath = path.join(geminiDir, 'settings.json');
   await fs.mkdir(geminiDir, { recursive: true });
-  await syncIsolatedSkills(
-    skillsDir,
-    args.skillSources ?? [],
-  );
+  await syncIsolatedSkills(skillsDir, args.skillSources ?? []);
 
   if (args.promptPath) {
     await fs.copyFile(args.promptPath, systemPromptPath);

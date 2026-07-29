@@ -71,7 +71,9 @@ export class PromClient {
 
     if (!this.registeredGauges.has(metricName)) {
       this.registeredGauges.add(metricName);
-      const gauge = this.meter.createObservableGauge(metricName, { description });
+      const gauge = this.meter.createObservableGauge(metricName, {
+        description,
+      });
 
       gauge.addCallback((observableResult) => {
         for (const metricData of this.getMetricsByLabels(metricName).values()) {
@@ -129,7 +131,10 @@ export class PromClient {
     return this.metricsState.get(metricName)?.size ?? 0;
   }
 
-  private hasMetric(metricName: string, labels: Record<string, string>): boolean {
+  private hasMetric(
+    metricName: string,
+    labels: Record<string, string>,
+  ): boolean {
     return this.getMetricsByLabels(metricName).has(this.getLabelKey(labels));
   }
 

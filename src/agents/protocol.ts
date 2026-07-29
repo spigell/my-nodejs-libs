@@ -22,11 +22,7 @@ export type RawOutputInspectionArgs = {
   text: string;
 };
 
-export type CliPermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'dontAsk'
-  | 'plan';
+export type CliPermissionMode = 'default' | 'acceptEdits' | 'dontAsk' | 'plan';
 
 export type CliBuildArgs = {
   prompt: string;
@@ -35,6 +31,7 @@ export type CliBuildArgs = {
   printTimeoutMs?: number;
   includeDirectories?: readonly string[];
   mcpConfigPath?: string;
+  strictMcpConfig?: boolean;
   tools?: readonly string[];
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];
