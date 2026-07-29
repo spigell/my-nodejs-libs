@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {
   CliAdapter,
   CliBuildArgs,
+  CliPermissionDenial,
   CliPermissionMode,
   EngineOutcome,
   EngineState,
@@ -27,6 +28,7 @@ export type CliRunnerArgs = {
 export type ExecutionResult = {
   text: string;
   tokenUsage?: TokenUsage;
+  permissionDenials?: CliPermissionDenial[];
   sessionId?: string;
   durationMs: number;
   warnings: string[];
@@ -341,6 +343,9 @@ export class CliRunner {
         durationMs: Date.now() - start,
         warnings: parserWarnings,
         ...(outcome.usage ? { tokenUsage: outcome.usage } : {}),
+        ...(outcome.permissionDenials !== undefined
+          ? { permissionDenials: outcome.permissionDenials }
+          : {}),
         ...(state.sessionId ? { sessionId: state.sessionId } : {}),
       };
     } catch (error) {

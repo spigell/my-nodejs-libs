@@ -225,6 +225,52 @@ void test('claudeAdapter finalizes text, session, and cache-aware usage', () => 
       total: 40,
       cached: 20,
     },
+    permissionDenials: [],
+  });
+});
+
+void test('claudeAdapter normalizes terminal permission denials', () => {
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Completed with a denied write.',
+      permission_denials: [
+        {
+          tool_name: 'Write',
+          tool_use_id: 'toolu_01ABC',
+          tool_input: {
+            file_path: '/workspace/deployment.yaml',
+            content: 'replicas: 3',
+          },
+        },
+        {
+          tool_name: '',
+          tool_use_id: 'toolu_invalid',
+          tool_input: {},
+        },
+      ],
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(claudeAdapter.finalize(state), {
+    ok: true,
+    text: 'Completed with a denied write.',
+    usage: null,
+    permissionDenials: [
+      {
+        toolName: 'Write',
+        toolUseId: 'toolu_01ABC',
+        toolInput: {
+          file_path: '/workspace/deployment.yaml',
+          content: 'replicas: 3',
+        },
+      },
+    ],
   });
 });
 
@@ -383,13 +429,20 @@ void test('CliRunner timeout still applies to text-mode adapters', async () => {
   await assert.rejects(runner.run('ignored'), /timed out after 50ms/);
 });
 
-void test('CliRunner propagates strictMcpConfig to buildCliArgs', async () => {
+void test('CliRunner propagates options and terminal permission denials', async () => {
   const receivedBuildArgs: CliBuildArgs[] = [];
   const resultLine = `${JSON.stringify({
     type: 'result',
     subtype: 'success',
     is_error: false,
     result: 'done',
+    permission_denials: [
+      {
+        tool_name: 'Bash',
+        tool_use_id: 'toolu_01DENIED',
+        tool_input: { command: 'kubectl delete pod api-0' },
+      },
+    ],
   })}\n`;
   const adapter: CliAdapter = {
     ...claudeAdapter,
@@ -405,13 +458,20 @@ void test('CliRunner propagates strictMcpConfig to buildCliArgs', async () => {
     logger: { info() {} },
   });
 
-  await runner.run('Inspect', {
+  const result = await runner.run('Inspect', {
     mcpConfigPath: '/isolated/claude/mcp.json',
     strictMcpConfig: false,
   });
 
   assert.equal(receivedBuildArgs.length, 1);
   assert.equal(receivedBuildArgs[0]?.strictMcpConfig, false);
+  assert.deepEqual(result.permissionDenials, [
+    {
+      toolName: 'Bash',
+      toolUseId: 'toolu_01DENIED',
+      toolInput: { command: 'kubectl delete pod api-0' },
+    },
+  ]);
 });
 
 void test('CliRunner does not inspect structured JSONL content as diagnostics', async () => {

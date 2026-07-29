@@ -1,6 +1,7 @@
 import type {
   CliAdapter,
   CliBuildArgs,
+  CliPermissionDenial,
   EngineOutcome,
   EngineState,
   RawOutputInspectionArgs,
@@ -88,6 +89,42 @@ function normalizeUsage(value: unknown): TokenUsage | null {
     total: input + output,
     cached,
   };
+}
+
+function normalizePermissionDenials(value: unknown): CliPermissionDenial[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const denial = item as Record<string, unknown>;
+    const toolName = denial.tool_name;
+    const toolUseId = denial.tool_use_id;
+    const toolInput = denial.tool_input;
+    if (
+      typeof toolName !== 'string' ||
+      !toolName.trim() ||
+      typeof toolUseId !== 'string' ||
+      !toolUseId.trim() ||
+      !toolInput ||
+      typeof toolInput !== 'object' ||
+      Array.isArray(toolInput)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        toolName: toolName.trim(),
+        toolUseId: toolUseId.trim(),
+        toolInput: toolInput as Record<string, unknown>,
+      },
+    ];
+  });
 }
 
 function maybeStoreSessionId(
@@ -225,6 +262,7 @@ export const claudeAdapter: CliAdapter = {
       ok: true,
       text,
       usage: normalizeUsage(result.usage),
+      permissionDenials: normalizePermissionDenials(result.permission_denials),
     };
   },
   inspectRawOutput(args: RawOutputInspectionArgs) {

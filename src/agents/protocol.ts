@@ -5,6 +5,12 @@ export type TokenUsage = {
   cached?: number;
 };
 
+export type CliPermissionDenial = {
+  toolName: string;
+  toolUseId: string;
+  toolInput: Record<string, unknown>;
+};
+
 export type EngineState = {
   finalResult: unknown;
   lastAssistantText: string;
@@ -14,7 +20,12 @@ export type EngineState = {
 };
 
 export type EngineOutcome =
-  | { ok: true; text: string; usage: TokenUsage | null }
+  | {
+      ok: true;
+      text: string;
+      usage: TokenUsage | null;
+      permissionDenials?: CliPermissionDenial[];
+    }
   | { ok: false; error: string; errorType?: string };
 
 export type RawOutputInspectionArgs = {

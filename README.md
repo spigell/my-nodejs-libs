@@ -146,7 +146,7 @@ try {
     tools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
     allowedTools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
   });
-  console.log(firstRun.text, firstRun.tokenUsage);
+  console.log(firstRun.text, firstRun.tokenUsage, firstRun.permissionDenials);
 
   const resumedRun = await runner.run('Check the proposed fix.', {
     sessionId: firstRun.sessionId,
@@ -188,7 +188,9 @@ MCP tool names. Permission bypass is available only through the explicit
 `dangerouslySkipPermissions: true` option and must not be used for untrusted
 content. Claude MCP configuration is strict by default; set
 `strictMcpConfig: false` only when configured subagents need access to MCP
-servers outside the supplied configuration.
+servers outside the supplied configuration. Claude execution results expose
+the terminal event's normalized `permissionDenials`, including the denied tool
+name, tool-use ID, and structured input.
 
 ## Development commands
 
