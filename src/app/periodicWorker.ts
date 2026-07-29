@@ -1,7 +1,5 @@
 import { Logging } from '../logger/logger.js';
-import {
-  MetricRegistry,
-} from '../prometheus-client/metricRegistry.js';
+import { MetricRegistry } from '../prometheus-client/metricRegistry.js';
 import type { MetricDefinition } from '../prometheus-client/metricRegistry.js';
 import { Worker } from './worker.js';
 import type { WorkerConfig } from './worker.js';

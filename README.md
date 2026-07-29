@@ -141,6 +141,7 @@ try {
 
   const firstRun = await runner.run('Investigate the failing workflow.', {
     mcpConfigPath: isolation.mcpConfigPath,
+    strictMcpConfig: false,
     permissionMode: 'dontAsk',
     tools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
     allowedTools: ['Read', 'Glob', 'Grep', 'mcp__github-mcp__search_code'],
@@ -185,7 +186,9 @@ an empty tool list emits `--tools ""`, which disables Claude's built-in tools.
 Investigators should receive an explicit allowlist of read-only built-in and
 MCP tool names. Permission bypass is available only through the explicit
 `dangerouslySkipPermissions: true` option and must not be used for untrusted
-content.
+content. Claude MCP configuration is strict by default; set
+`strictMcpConfig: false` only when configured subagents need access to MCP
+servers outside the supplied configuration.
 
 ## Development commands
 

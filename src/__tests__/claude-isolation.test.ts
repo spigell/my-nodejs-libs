@@ -26,10 +26,7 @@ void test('createClaudeIsolation separates classifier and investigator configura
   );
   tempDirs.push(tempRoot);
   process.env.HOME = path.join(tempRoot, 'home');
-  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(
-    tempRoot,
-    'isolated',
-  );
+  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(tempRoot, 'isolated');
 
   const sharedClaudeHome = path.join(tempRoot, 'shared-claude');
   await fs.mkdir(sharedClaudeHome, { recursive: true });
@@ -103,11 +100,11 @@ void test('createClaudeIsolation separates classifier and investigator configura
   assert.equal(classifier.env.CLASSIFIER_MODE, 'untrusted');
   assert.equal(classifier.persistent, false);
   assert.equal(investigator.persistent, true);
+  assert.equal(investigator.env.CLAUDE_CONFIG_DIR, investigator.isolatedHome);
   assert.equal(
-    investigator.env.CLAUDE_CONFIG_DIR,
-    investigator.isolatedHome,
+    await fs.readFile(classifier.promptPath, 'utf8'),
+    '# Classifier\n',
   );
-  assert.equal(await fs.readFile(classifier.promptPath, 'utf8'), '# Classifier\n');
   assert.equal(
     await fs.readFile(investigator.promptPath, 'utf8'),
     '# Investigator\n',
@@ -157,10 +154,7 @@ void test('createClaudeIsolation removes stale copied subagents', async () => {
     path.join(os.tmpdir(), 'claude-isolation-'),
   );
   tempDirs.push(tempRoot);
-  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(
-    tempRoot,
-    'isolated',
-  );
+  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(tempRoot, 'isolated');
 
   const sharedClaudeHome = path.join(tempRoot, 'shared-claude');
   await fs.mkdir(sharedClaudeHome, { recursive: true });
@@ -267,10 +261,7 @@ void test('createClaudeIsolation requires shared Claude credentials', async () =
     path.join(os.tmpdir(), 'claude-isolation-'),
   );
   tempDirs.push(tempRoot);
-  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(
-    tempRoot,
-    'isolated',
-  );
+  process.env.CLAUDE_ISOLATED_HOME_ROOT = path.join(tempRoot, 'isolated');
 
   await assert.rejects(
     createClaudeIsolation({

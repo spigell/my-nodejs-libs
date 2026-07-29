@@ -18,7 +18,7 @@ const CLAUDE_AUTH_PATTERNS = [
 function inspectAuthenticationPrompt(
   args: RawOutputInspectionArgs,
 ): string | null {
-  const normalized = args.text.trim().toLowerCase();
+  const normalized = args.text.trim().toLowerCase().replace(/\s+/g, ' ');
   if (
     !normalized ||
     !CLAUDE_AUTH_PATTERNS.some((pattern) => normalized.includes(pattern))
@@ -53,10 +53,7 @@ function extractText(value: unknown): string {
     .trim();
 }
 
-function readTokenCount(
-  usage: Record<string, unknown>,
-  key: string,
-): number {
+function readTokenCount(usage: Record<string, unknown>, key: string): number {
   const value = usage[key];
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? value
@@ -70,10 +67,7 @@ function normalizeUsage(value: unknown): TokenUsage | null {
 
   const usage = value as Record<string, unknown>;
   const uncachedInput = readTokenCount(usage, 'input_tokens');
-  const cacheCreation = readTokenCount(
-    usage,
-    'cache_creation_input_tokens',
-  );
+  const cacheCreation = readTokenCount(usage, 'cache_creation_input_tokens');
   const cached = readTokenCount(usage, 'cache_read_input_tokens');
   const output = readTokenCount(usage, 'output_tokens');
   const hasTokenCounts = [
@@ -161,11 +155,10 @@ export const claudeAdapter: CliAdapter = {
       cliArgs.push('--add-dir', directory);
     }
     if (args.mcpConfigPath) {
-      cliArgs.push(
-        '--mcp-config',
-        args.mcpConfigPath,
-        '--strict-mcp-config',
-      );
+      cliArgs.push('--mcp-config', args.mcpConfigPath);
+      if (args.strictMcpConfig !== false) {
+        cliArgs.push('--strict-mcp-config');
+      }
     }
 
     return cliArgs;
@@ -208,9 +201,14 @@ export const claudeAdapter: CliAdapter = {
       status === 'error' ||
       status === 'failed';
     if (isError) {
+      const error = normalizeError(result);
       return {
         ok: false,
-        error: normalizeError(result),
+        error:
+          inspectAuthenticationPrompt({
+            stream: 'stdout',
+            text: error,
+          }) ?? error,
       };
     }
 

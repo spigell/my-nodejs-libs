@@ -9,7 +9,9 @@ import {
   createJsonlParser,
   geminiAdapter,
   type CliAdapter,
+  type CliBuildArgs,
   type EngineState,
+  type RawOutputInspectionArgs,
 } from '../index.js';
 
 void test('createJsonlParser handles chunks, blank lines, invalid lines, and final lines', () => {
@@ -75,7 +77,7 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
   });
 });
 
-void test('claudeAdapter builds stream JSON args for a resumable run', () => {
+void test('claudeAdapter defaults to strict MCP configuration', () => {
   const readOnlyTools = [
     'Read',
     'Glob',
@@ -118,6 +120,34 @@ void test('claudeAdapter builds stream JSON args for a resumable run', () => {
       '--strict-mcp-config',
     ],
   );
+});
+
+void test('claudeAdapter enables strict MCP configuration explicitly', () => {
+  const cliArgs = claudeAdapter.buildCliArgs({
+    prompt: 'Inspect the deployment',
+    mcpConfigPath: '/isolated/claude/mcp.json',
+    strictMcpConfig: true,
+  });
+
+  assert.deepEqual(cliArgs.slice(-3), [
+    '--mcp-config',
+    '/isolated/claude/mcp.json',
+    '--strict-mcp-config',
+  ]);
+});
+
+void test('claudeAdapter can disable strict MCP configuration', () => {
+  const cliArgs = claudeAdapter.buildCliArgs({
+    prompt: 'Inspect the deployment',
+    mcpConfigPath: '/isolated/claude/mcp.json',
+    strictMcpConfig: false,
+  });
+
+  assert.deepEqual(cliArgs.slice(-2), [
+    '--mcp-config',
+    '/isolated/claude/mcp.json',
+  ]);
+  assert.doesNotMatch(cliArgs.join(' '), /--strict-mcp-config/);
 });
 
 void test('claudeAdapter disables all tools for a classifier', () => {
@@ -227,6 +257,26 @@ void test('claudeAdapter returns terminal errors', () => {
   });
 });
 
+void test('claudeAdapter normalizes terminal authentication errors', () => {
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      error: 'Invalid API key',
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(claudeAdapter.finalize(state), {
+    ok: false,
+    error:
+      'Claude authentication required. Log in to Claude Code or provide valid Anthropic credentials.',
+  });
+});
+
 void test('agyAdapter builds print args with timeout and conversation id', () => {
   assert.deepEqual(
     agyAdapter.buildCliArgs({
@@ -274,8 +324,6 @@ void test('agyAdapter rejects empty stdout output', () => {
     error: 'Agy command succeeded without producing any stdout output',
   });
 });
-
-
 
 void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {
   const textAdapter: CliAdapter = {
@@ -333,4 +381,190 @@ void test('CliRunner timeout still applies to text-mode adapters', async () => {
   });
 
   await assert.rejects(runner.run('ignored'), /timed out after 50ms/);
+});
+
+void test('CliRunner propagates strictMcpConfig to buildCliArgs', async () => {
+  const receivedBuildArgs: CliBuildArgs[] = [];
+  const resultLine = `${JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: 'done',
+  })}\n`;
+  const adapter: CliAdapter = {
+    ...claudeAdapter,
+    buildCliArgs(args) {
+      receivedBuildArgs.push(args);
+      return ['-e', `process.stdout.write(${JSON.stringify(resultLine)})`];
+    },
+  };
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+
+  await runner.run('Inspect', {
+    mcpConfigPath: '/isolated/claude/mcp.json',
+    strictMcpConfig: false,
+  });
+
+  assert.equal(receivedBuildArgs.length, 1);
+  assert.equal(receivedBuildArgs[0]?.strictMcpConfig, false);
+});
+
+void test('CliRunner does not inspect structured JSONL content as diagnostics', async () => {
+  const helmAnnotation =
+    'nginx.ingress.kubernetes.io/auth-realm: Authentication Required';
+  const output = [
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Reading repository content.' }],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            content: `metadata:\n  annotations:\n    ${helmAnnotation}`,
+          },
+        ],
+      },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Repository content is valid.',
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join('\n');
+  const inspections: RawOutputInspectionArgs[] = [];
+  const adapter: CliAdapter = {
+    ...claudeAdapter,
+    buildCliArgs() {
+      const splitAt = output.indexOf(helmAnnotation) + helmAnnotation.length;
+      const firstChunk = output.slice(0, splitAt);
+      const finalChunk = `${output.slice(splitAt)}\n`;
+      return [
+        '-e',
+        [
+          `process.stdout.write(${JSON.stringify(firstChunk)});`,
+          `setTimeout(() => process.stdout.write(${JSON.stringify(finalChunk)}), 25);`,
+        ].join(''),
+      ];
+    },
+    inspectRawOutput(args) {
+      inspections.push(args);
+      return claudeAdapter.inspectRawOutput?.(args) ?? null;
+    },
+  };
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+
+  const result = await runner.run('Inspect');
+
+  assert.equal(result.text, 'Repository content is valid.');
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(inspections, []);
+});
+
+void test('CliRunner detects split unstructured JSONL authentication diagnostics', async () => {
+  const adapter: CliAdapter = {
+    ...claudeAdapter,
+    buildCliArgs() {
+      return [
+        '-e',
+        [
+          "process.stdout.write('Authentication ');",
+          "setTimeout(() => process.stdout.write('required'), 25);",
+          'setTimeout(() => undefined, 1000);',
+        ].join(''),
+      ];
+    },
+  };
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    timeoutMs: 250,
+    logger: { info() {} },
+  });
+
+  await assert.rejects(runner.run('Inspect'), (error: Error) => {
+    assert.match(
+      error.message,
+      /Claude authentication required\. Log in to Claude Code or provide valid Anthropic credentials\./,
+    );
+    assert.doesNotMatch(error.message, /timed out/i);
+    return true;
+  });
+});
+
+void test('CliRunner detects split stderr authentication diagnostics', async () => {
+  const adapter: CliAdapter = {
+    ...claudeAdapter,
+    buildCliArgs() {
+      return [
+        '-e',
+        [
+          "process.stderr.write('Invalid API ');",
+          "setTimeout(() => process.stderr.write('key'), 25);",
+          'setTimeout(() => undefined, 1000);',
+        ].join(''),
+      ];
+    },
+  };
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+
+  await assert.rejects(
+    runner.run('Inspect'),
+    /Claude authentication required\. Log in to Claude Code or provide valid Anthropic credentials\./,
+  );
+});
+
+void test('CliRunner normalizes a terminal JSONL authentication error', async () => {
+  const resultLine = `${JSON.stringify({
+    type: 'result',
+    subtype: 'error',
+    is_error: true,
+    error: 'Invalid API key',
+  })}\n`;
+  const adapter: CliAdapter = {
+    ...claudeAdapter,
+    buildCliArgs() {
+      return ['-e', `process.stdout.write(${JSON.stringify(resultLine)})`];
+    },
+  };
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+
+  await assert.rejects(runner.run('Inspect'), (error: Error) => {
+    assert.match(
+      error.message,
+      /Claude authentication required\. Log in to Claude Code or provide valid Anthropic credentials\./,
+    );
+    assert.doesNotMatch(error.message, /exit 143|interrupted by user/i);
+    return true;
+  });
 });

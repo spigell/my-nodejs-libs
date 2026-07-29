@@ -38,6 +38,7 @@ export type CliRunOptions = {
   signal?: AbortSignal;
   includeDirectories?: readonly string[];
   mcpConfigPath?: string;
+  strictMcpConfig?: boolean;
   tools?: readonly string[];
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];
@@ -96,6 +97,9 @@ export class CliRunner {
     }
     if (normalizedOptions.mcpConfigPath !== undefined) {
       buildArgs.mcpConfigPath = normalizedOptions.mcpConfigPath;
+    }
+    if (normalizedOptions.strictMcpConfig !== undefined) {
+      buildArgs.strictMcpConfig = normalizedOptions.strictMcpConfig;
     }
     if (normalizedOptions.tools !== undefined) {
       buildArgs.tools = normalizedOptions.tools;
@@ -157,6 +161,45 @@ export class CliRunner {
       rawStderr: '',
     };
 
+    let stderr = '';
+    let rawStdoutTail = '';
+    let rawStderrTail = '';
+    let stdoutDiagnosticTail = '';
+    let stderrDiagnosticTail = '';
+    let killedByTimeout = false;
+    let killedByAbortSignal = false;
+    let abortReason: string | null = null;
+    const applyDiagnosticInspection = (
+      stream: 'stdout' | 'stderr',
+      text: string,
+    ): void => {
+      if (!this.args.adapter.inspectRawOutput) {
+        return;
+      }
+
+      const inspectionError = this.args.adapter.inspectRawOutput({
+        stream,
+        text,
+      });
+      if (inspectionError && !abortReason) {
+        abortReason = inspectionError;
+        child.kill('SIGTERM');
+      }
+    };
+    const inspectDiagnostic = (
+      stream: 'stdout' | 'stderr',
+      text: string,
+    ): void => {
+      if (stream === 'stdout') {
+        stdoutDiagnosticTail = appendOutputTail(stdoutDiagnosticTail, text);
+      } else {
+        stderrDiagnosticTail = appendOutputTail(stderrDiagnosticTail, text);
+      }
+      applyDiagnosticInspection(
+        stream,
+        stream === 'stdout' ? stdoutDiagnosticTail : stderrDiagnosticTail,
+      );
+    };
     const outputMode = this.args.adapter.outputMode ?? 'jsonl';
     const parserWarnings: string[] = [];
     const parser =
@@ -167,16 +210,18 @@ export class CliRunner {
             },
             onInvalidLine: (line) => {
               parserWarnings.push(line);
+              inspectDiagnostic('stdout', `${line}\n`);
+            },
+            onPendingLine: (line) => {
+              if (isDefinitelyUnstructuredJsonlLine(line)) {
+                applyDiagnosticInspection(
+                  'stdout',
+                  appendOutputTail(stdoutDiagnosticTail, line),
+                );
+              }
             },
           })
         : null;
-
-    let stderr = '';
-    let rawStdoutTail = '';
-    let rawStderrTail = '';
-    let killedByTimeout = false;
-    let killedByAbortSignal = false;
-    let abortReason: string | null = null;
 
     const timeoutHandle = setTimeout(() => {
       killedByTimeout = true;
@@ -200,25 +245,18 @@ export class CliRunner {
       state.rawStdout += text;
       rawStdoutTail = appendOutputTail(rawStdoutTail, text);
 
-      const inspectionError = this.args.adapter.inspectRawOutput?.({
-        stream: 'stdout',
-        text,
-      });
-      if (inspectionError && !abortReason) {
-        abortReason = inspectionError;
-        child.kill('SIGTERM');
-        return;
-      }
-
       if (parser) {
         try {
           parser.write(chunk);
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           stderr = `${this.args.command} stream parse error: ${message}`;
           abortReason = stderr;
           child.kill('SIGTERM');
         }
+      } else {
+        inspectDiagnostic('stdout', text);
       }
     });
 
@@ -229,14 +267,7 @@ export class CliRunner {
       state.rawStderr += text;
       rawStderrTail = appendOutputTail(rawStderrTail, text);
 
-      const inspectionError = this.args.adapter.inspectRawOutput?.({
-        stream: 'stderr',
-        text,
-      });
-      if (inspectionError && !abortReason) {
-        abortReason = inspectionError;
-        child.kill('SIGTERM');
-      }
+      inspectDiagnostic('stderr', text);
     });
 
     const exitCode = await new Promise<number>((resolve, reject) => {
@@ -256,6 +287,16 @@ export class CliRunner {
 
     clearTimeout(timeoutHandle);
     normalizedOptions.signal?.removeEventListener('abort', abortHandler);
+
+    if (parser) {
+      try {
+        parser.end();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        stderr = `${this.args.command} stream parse error: ${message}`;
+        abortReason ??= stderr;
+      }
+    }
 
     if (killedByTimeout) {
       throw new Error(
@@ -290,7 +331,6 @@ export class CliRunner {
     }
 
     try {
-      parser?.end();
       const outcome = this.args.adapter.finalize(state);
       if (!outcome.ok) {
         throw new Error(formatEngineOutcomeError(this.args.command, outcome));
@@ -351,6 +391,14 @@ function normalizeChunk(chunk: unknown): string {
   return Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
 }
 
+function isDefinitelyUnstructuredJsonlLine(line: string): boolean {
+  const firstCharacter = line.trimStart()[0];
+  return (
+    firstCharacter !== undefined &&
+    !'{["-0123456789tfn'.includes(firstCharacter)
+  );
+}
+
 function appendOutputTail(current: string, next: string): string {
   const combined = `${current}${next}`;
   return combined.length > OUTPUT_TAIL_LIMIT_BYTES
@@ -380,6 +428,7 @@ function formatRunnerError(args: {
 export function createJsonlParser(args: {
   onLine: (event: unknown) => void;
   onInvalidLine: (line: string) => void;
+  onPendingLine?: (line: string) => void;
 }): JsonlParser {
   const state = { buffer: '' };
   const parseLine = (line: string) => {
@@ -414,6 +463,10 @@ export function createJsonlParser(args: {
         }
 
         parseLine(line);
+      }
+
+      if (state.buffer) {
+        args.onPendingLine?.(state.buffer);
       }
     },
     end() {

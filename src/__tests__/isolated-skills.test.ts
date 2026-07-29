@@ -112,5 +112,8 @@ void test('resolveSkillSources maps a registry entry', () => {
 });
 
 void test('resolveSkillSources rejects unknown skill sets', () => {
-  assert.throws(() => resolveSkillSources({}, ['does-not-exist']), /Unknown skill set requested/);
+  assert.throws(
+    () => resolveSkillSources({}, ['does-not-exist']),
+    /Unknown skill set requested/,
+  );
 });

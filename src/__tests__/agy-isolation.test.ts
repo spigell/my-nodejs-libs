@@ -95,7 +95,9 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
     await fs.readFile(result.promptPath, 'utf8'),
     await fs.readFile(promptSourcePath, 'utf8'),
   );
-  const settingsJson = JSON.parse(await fs.readFile(result.settingsPath, 'utf8')) as {
+  const settingsJson = JSON.parse(
+    await fs.readFile(result.settingsPath, 'utf8'),
+  ) as {
     model?: string;
     trustedWorkspaces?: string[];
   };
@@ -118,10 +120,7 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
       path: result.oauthTokenPath,
     },
   ]);
-  assert.equal(
-    await fs.readlink(result.oauthTokenPath),
-    sharedOauthTokenPath,
-  );
+  assert.equal(await fs.readlink(result.oauthTokenPath), sharedOauthTokenPath);
 });
 
 void test('createAgyIsolation does not require a shared oauth token', async () => {
@@ -132,7 +131,9 @@ void test('createAgyIsolation does not require a shared oauth token', async () =
     '/home/ubuntu/.gemini/antigravity-cli/antigravity-oauth-token';
   fs.lstat = (async (targetPath: PathLike) => {
     if (String(targetPath) === sharedOauthTokenPath) {
-      const err = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      const err = new Error(
+        'ENOENT: no such file or directory',
+      ) as NodeJS.ErrnoException;
       err.code = 'ENOENT';
       throw err;
     }
@@ -159,7 +160,9 @@ void test('createAgyIsolation writes the default model when settings omit it', a
     },
   });
 
-  const settingsJson = JSON.parse(await fs.readFile(result.settingsPath, 'utf8')) as {
+  const settingsJson = JSON.parse(
+    await fs.readFile(result.settingsPath, 'utf8'),
+  ) as {
     model?: string;
     trustedWorkspaces?: string[];
   };

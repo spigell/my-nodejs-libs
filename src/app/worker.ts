@@ -1,9 +1,7 @@
 import { Logging } from '../logger/logger.js';
 import type { Status } from './app.js';
 import type { FuelWallet } from '../fuel/wallet/wallet.js';
-import {
-  MetricRegistry,
-} from '../prometheus-client/metricRegistry.js';
+import { MetricRegistry } from '../prometheus-client/metricRegistry.js';
 import type { MetricDefinition } from '../prometheus-client/metricRegistry.js';
 
 const APP_WORKER_STATUS_METRIC_KEY = 'worker-status';

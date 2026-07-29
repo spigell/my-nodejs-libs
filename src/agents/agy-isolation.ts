@@ -1,10 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  type SkillSource,
-  syncIsolatedSkills,
-} from './isolated-skills.js';
+import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
 
 export const DEFAULT_AGY_MODEL = 'Gemini 3.5 Flash (Medium)';
 const AGY_SHARED_OAUTH_TOKEN_PATH =
@@ -96,7 +93,10 @@ export async function createAgyIsolation(args: {
     );
   }
 
-  await syncOptionalSharedStateLink(AGY_SHARED_OAUTH_TOKEN_PATH, oauthTokenPath);
+  await syncOptionalSharedStateLink(
+    AGY_SHARED_OAUTH_TOKEN_PATH,
+    oauthTokenPath,
+  );
 
   return {
     env: {

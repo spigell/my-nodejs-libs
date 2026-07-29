@@ -8,7 +8,10 @@ void test('simple retries with exponential backoff and returns attempt count', a
   const originalSetTimeout = globalThis.setTimeout;
   const delays: number[] = [];
 
-  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+  globalThis.setTimeout = ((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+  ) => {
     delays.push(delay ?? 0);
     callback();
     return { ref() {}, unref() {} } as NodeJS.Timeout;
