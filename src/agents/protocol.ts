@@ -43,6 +43,7 @@ export type CliBuildArgs = {
   includeDirectories?: readonly string[];
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
+  systemPromptFile?: string;
   tools?: readonly string[];
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];

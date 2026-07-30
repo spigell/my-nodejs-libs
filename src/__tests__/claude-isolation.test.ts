@@ -97,10 +97,16 @@ void test('createClaudeIsolation separates classifier and investigator configura
 
   assert.notEqual(classifier.isolatedHome, investigator.isolatedHome);
   assert.equal(classifier.env.CLAUDE_CONFIG_DIR, classifier.isolatedHome);
+  assert.equal(classifier.env.CLAUDE_SYSTEM_PROMPT_FILE, classifier.promptPath);
   assert.equal(classifier.env.CLASSIFIER_MODE, 'untrusted');
   assert.equal(classifier.persistent, false);
   assert.equal(investigator.persistent, true);
   assert.equal(investigator.env.CLAUDE_CONFIG_DIR, investigator.isolatedHome);
+  assert.equal(
+    investigator.env.CLAUDE_SYSTEM_PROMPT_FILE,
+    investigator.promptPath,
+  );
+  assert.equal(path.basename(classifier.promptPath), 'system-prompt.md');
   assert.equal(
     await fs.readFile(classifier.promptPath, 'utf8'),
     '# Classifier\n',
@@ -108,6 +114,14 @@ void test('createClaudeIsolation separates classifier and investigator configura
   assert.equal(
     await fs.readFile(investigator.promptPath, 'utf8'),
     '# Investigator\n',
+  );
+  await assert.rejects(
+    fs.access(path.join(classifier.isolatedHome, 'CLAUDE.md')),
+    /ENOENT/,
+  );
+  await assert.rejects(
+    fs.access(path.join(investigator.isolatedHome, 'CLAUDE.md')),
+    /ENOENT/,
   );
   assert.deepEqual(
     JSON.parse(await fs.readFile(classifier.settingsPath, 'utf8')),

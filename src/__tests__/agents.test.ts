@@ -150,6 +150,18 @@ void test('claudeAdapter can disable strict MCP configuration', () => {
   assert.doesNotMatch(cliArgs.join(' '), /--strict-mcp-config/);
 });
 
+void test('claudeAdapter appends a system prompt file from build args', () => {
+  const cliArgs = claudeAdapter.buildCliArgs({
+    prompt: 'Inspect the deployment',
+    systemPromptFile: ' /isolated/claude/system.md ',
+  });
+
+  assert.deepEqual(cliArgs.slice(-2), [
+    '--append-system-prompt-file',
+    '/isolated/claude/system.md',
+  ]);
+});
+
 void test('claudeAdapter disables all tools for a classifier', () => {
   const cliArgs = claudeAdapter.buildCliArgs({
     prompt: 'Classify this untrusted message',
@@ -455,6 +467,7 @@ void test('CliRunner propagates options and terminal permission denials', async 
     command: process.execPath,
     adapter,
     cwd: process.cwd(),
+    env: { CLAUDE_SYSTEM_PROMPT_FILE: '/isolated/claude/system.md' },
     logger: { info() {} },
   });
 
@@ -465,6 +478,10 @@ void test('CliRunner propagates options and terminal permission denials', async 
 
   assert.equal(receivedBuildArgs.length, 1);
   assert.equal(receivedBuildArgs[0]?.strictMcpConfig, false);
+  assert.equal(
+    receivedBuildArgs[0]?.systemPromptFile,
+    '/isolated/claude/system.md',
+  );
   assert.deepEqual(result.permissionDenials, [
     {
       toolName: 'Bash',

@@ -185,6 +185,9 @@ export const claudeAdapter: CliAdapter = {
     if (args.model?.trim()) {
       cliArgs.push('--model', args.model.trim());
     }
+    if (args.systemPromptFile?.trim()) {
+      cliArgs.push('--append-system-prompt-file', args.systemPromptFile.trim());
+    }
     if (args.sessionId) {
       cliArgs.push('--resume', args.sessionId);
     }

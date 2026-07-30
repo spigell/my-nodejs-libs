@@ -49,7 +49,8 @@ export async function createClaudeIsolation(args: {
   const isolatedHome = persistent
     ? path.join(claudeIsolationRoot, toolName)
     : await fs.mkdtemp(path.join(claudeIsolationRoot, `${toolName}-`));
-  const promptPath = path.join(isolatedHome, 'CLAUDE.md');
+  const promptPath = path.join(isolatedHome, 'system-prompt.md');
+  const legacyMemoryPath = path.join(isolatedHome, 'CLAUDE.md');
   const settingsPath = path.join(isolatedHome, 'settings.json');
   const mcpConfigPath = path.join(isolatedHome, 'mcp.json');
   const skillsDir = path.join(isolatedHome, 'skills');
@@ -60,6 +61,7 @@ export async function createClaudeIsolation(args: {
     await fs.mkdir(isolatedHome, { recursive: true });
     await syncIsolatedSkills(skillsDir, args.skillSources ?? []);
     await syncClaudeAgents(agentsDir, args.agentSource, agentNames);
+    await fs.rm(legacyMemoryPath, { force: true });
 
     if (args.promptPath) {
       await fs.copyFile(args.promptPath, promptPath);
@@ -86,6 +88,7 @@ export async function createClaudeIsolation(args: {
     env: {
       ...(args.extraEnv || {}),
       CLAUDE_CONFIG_DIR: isolatedHome,
+      ...(args.promptPath ? { CLAUDE_SYSTEM_PROMPT_FILE: promptPath } : {}),
     },
     persistent,
     isolatedHome,

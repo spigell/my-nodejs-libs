@@ -95,6 +95,9 @@ Do not import from `src/` in consumers. Published output comes from `dist/`.
 Use `createClaudeIsolation` to give each Claude role its own prompt, settings,
 skills, and MCP configuration while sharing only the Claude Code OAuth
 credentials required for authentication.
+For Claude, `promptPath` is copied into the isolated config directory and
+passed to the CLI with `--append-system-prompt-file`; it is not installed as
+`CLAUDE.md` memory context.
 
 ```ts
 import {

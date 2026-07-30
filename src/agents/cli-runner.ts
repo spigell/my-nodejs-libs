@@ -103,6 +103,9 @@ export class CliRunner {
     if (normalizedOptions.strictMcpConfig !== undefined) {
       buildArgs.strictMcpConfig = normalizedOptions.strictMcpConfig;
     }
+    if (this.args.env?.CLAUDE_SYSTEM_PROMPT_FILE !== undefined) {
+      buildArgs.systemPromptFile = this.args.env.CLAUDE_SYSTEM_PROMPT_FILE;
+    }
     if (normalizedOptions.tools !== undefined) {
       buildArgs.tools = normalizedOptions.tools;
     }
