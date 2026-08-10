@@ -73,7 +73,8 @@ The package root exports everything from [src/index.ts](/project/my-shared-infra
 - app: `Worker`, `PeriodicWorker`, `QueueWorker`, `WebSocketWorker`, `CircularBuffer`
 - HTTP: `Server`, `JsonAxiosInstance`
 - logging: `Logging`, `createMiddleware`
-- metrics: `PromClient`, `MetricRegistry`
+- metrics: `MetricRegistry`, `CounterMetric`, `GaugeMetric`, `HistogramMetric`,
+  `PromClient`, and typed metrics errors
 - messaging: `TelegramSender`
 - utils: `RetryError`, `simple`, `chunk`, `Coin`
 
@@ -89,6 +90,73 @@ import {
 ```
 
 Do not import from `src/` in consumers. Published output comes from `dist/`.
+
+## Prometheus metrics
+
+`MetricRegistry` owns an isolated OpenTelemetry meter provider and a
+Prometheus exporter. Construction does not start a server or register a route.
+
+```ts
+import { MetricRegistry } from '@spigell/my-nodejs-libs';
+
+const metrics = new MetricRegistry({
+  subsystem: 'vlad',
+  meterName: 'vlad-control-api',
+  defaultLabels: {
+    installation: 'uspio-workbench',
+    component: 'control-api',
+  },
+  defaultHistogramBoundaries: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  seriesLimit: 100,
+});
+
+const requests = metrics.counter({
+  name: 'api_requests_total',
+  help: 'Completed control API requests',
+  labelNames: ['method', 'route', 'status_class'],
+});
+const dutyActive = metrics.gauge({
+  name: 'duty_active',
+  help: 'Whether an unexpired duty period is active',
+});
+const duration = metrics.histogram({
+  name: 'api_request_duration_seconds',
+  help: 'Control API request duration',
+  unit: 's',
+  labelNames: ['method', 'route', 'status_class'],
+});
+
+const labels = {
+  method: 'GET',
+  route: '/v1/status',
+  status_class: '2xx',
+};
+requests.add(1, labels);
+dutyActive.set(1);
+duration.record(0.042, labels);
+
+const snapshot = await metrics.collect();
+// Fastify: reply.type(snapshot.contentType).send(snapshot.body)
+
+await metrics.shutdown();
+```
+
+Metric and label names use Prometheus naming rules. Every observation must
+provide exactly the declared labels, and label values are strings. Default
+labels cannot be overridden by observations. Counter names always emit one
+`_total` suffix: the library adds it when omitted and preserves it when given.
+
+The default active-series limit is `100` per metric. New series over the limit
+are dropped and counted in
+`prom_client_observations_rejected_total{reason="series_limit"}`. Set
+`seriesLimitBehavior: 'throw'` on the registry or an instrument to receive a
+`MetricSeriesLimitError` instead. Gauge `remove()`, `clear()`, and atomic
+`replace()` retire stale series and release their cardinality slots.
+
+`shutdown()` is asynchronous and idempotent. Observations and collections after
+shutdown throw `MetricsShutdownError`. The old `PromClient` methods and the
+`MetricRegistry(subsystem, promClient)` constructor remain available as
+deprecated compatibility APIs for the `0.2.x` release line.
 
 ## Isolated Claude execution
 

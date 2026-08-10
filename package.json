@@ -1,6 +1,6 @@
 {
   "name": "@spigell/my-nodejs-libs",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "license": "UNLICENSED",
   "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
   "type": "module",
@@ -36,9 +36,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-prometheus": "^0.205.0",
-    "@opentelemetry/sdk-metrics": "^2.1.0",
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/exporter-prometheus": "0.205.0",
+    "@opentelemetry/sdk-metrics": "2.1.0",
     "axios": "^1.8.4",
     "cors": "^2.8.5",
     "express": "^5.1.0",

@@ -21,6 +21,7 @@ export * from './http/server.js';
 export * from './logger/logger.js';
 export * from './logger/middleware.js';
 export * from './prometheus-client/client.js';
+export * from './prometheus-client/errors.js';
 export * from './prometheus-client/metricRegistry.js';
 export * from './telegram/sender.js';
 export * from './utils/coin.js';
