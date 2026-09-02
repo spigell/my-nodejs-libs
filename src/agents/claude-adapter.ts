@@ -4,6 +4,7 @@ import type {
   CliPermissionDenial,
   EngineOutcome,
   EngineState,
+  ModelUsage,
   RawOutputInspectionArgs,
   TokenUsage,
 } from './protocol.js';
@@ -61,7 +62,16 @@ function readTokenCount(usage: Record<string, unknown>, key: string): number {
     : 0;
 }
 
-function normalizeUsage(value: unknown): TokenUsage | null {
+/**
+ * The terminal result event's `usage` block, which describes the run's FINAL
+ * API call rather than the run.
+ *
+ * Kept only as the fallback for `normalizeUsage`. Treating it as the run's
+ * total was this module's long-standing bug: on a one-turn probe run it
+ * reported 44 output tokens where the run had actually spent 58 across its main
+ * and auxiliary calls, and the gap widens with every extra turn.
+ */
+function normalizeFinalCallUsage(value: unknown): TokenUsage | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -89,6 +99,75 @@ function normalizeUsage(value: unknown): TokenUsage | null {
     total: input + output,
     cached,
   };
+}
+
+/**
+ * The `modelUsage` map the Claude CLI emits on its terminal result event: the
+ * run's aggregate consumption, keyed by concrete model ID.
+ */
+function normalizeModelUsage(value: unknown): ModelUsage[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([model, entry]) => {
+      if (!model.trim() || !entry || typeof entry !== 'object') {
+        return [];
+      }
+
+      const usage = entry as Record<string, unknown>;
+      return [
+        {
+          model: model.trim(),
+          input: readTokenCount(usage, 'inputTokens'),
+          output: readTokenCount(usage, 'outputTokens'),
+          cacheRead: readTokenCount(usage, 'cacheReadInputTokens'),
+          cacheCreation: readTokenCount(usage, 'cacheCreationInputTokens'),
+          webSearchRequests: readTokenCount(usage, 'webSearchRequests'),
+          costUsd: readTokenCount(usage, 'costUSD'),
+        },
+      ];
+    },
+  );
+}
+
+/**
+ * The run's token usage.
+ *
+ * Summed from the per-model breakdown when the CLI provides one, because that
+ * is the only field on the event describing the whole run. Falls back to the
+ * final call's usage when it does not, so a CLI version that omits `modelUsage`
+ * keeps the previous behaviour rather than reporting nothing.
+ *
+ * `input` keeps the definition it always had — uncached input plus cache
+ * creation plus cache reads — so the shape and meaning of the result are
+ * unchanged and only its accuracy improves.
+ */
+function normalizeUsage(
+  usageValue: unknown,
+  models: readonly ModelUsage[],
+): TokenUsage | null {
+  if (models.length === 0) {
+    return normalizeFinalCallUsage(usageValue);
+  }
+
+  let input = 0;
+  let output = 0;
+  let cached = 0;
+  for (const model of models) {
+    input += model.input + model.cacheCreation + model.cacheRead;
+    output += model.output;
+    cached += model.cacheRead;
+  }
+
+  return { input, output, total: input + output, cached };
+}
+
+function normalizeCostUsd(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 function normalizePermissionDenials(value: unknown): CliPermissionDenial[] {
@@ -261,10 +340,14 @@ export const claudeAdapter: CliAdapter = {
       );
     }
 
+    const modelUsage = normalizeModelUsage(result.modelUsage);
+    const costUsd = normalizeCostUsd(result.total_cost_usd);
     return {
       ok: true,
       text,
-      usage: normalizeUsage(result.usage),
+      usage: normalizeUsage(result.usage, modelUsage),
+      ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(modelUsage.length > 0 ? { modelUsage } : {}),
       permissionDenials: normalizePermissionDenials(result.permission_denials),
     };
   },

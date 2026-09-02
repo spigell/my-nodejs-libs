@@ -241,6 +241,142 @@ void test('claudeAdapter finalizes text, session, and cache-aware usage', () => 
   });
 });
 
+void test('claudeAdapter reports the whole run rather than its final API call', () => {
+  // The terminal event as the Claude CLI actually emits it, captured from a
+  // real headless run. The divergence is the point: `usage` describes the final
+  // API call (44 output tokens) while `modelUsage` covers the run (58, across
+  // its main and auxiliary calls). Reading `usage` as the run's total was this
+  // adapter's bug.
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'pong',
+      total_cost_usd: 0.0187875,
+      usage: {
+        input_tokens: 10,
+        cache_creation_input_tokens: 8160,
+        cache_read_input_tokens: 16435,
+        output_tokens: 44,
+      },
+      modelUsage: {
+        'claude-haiku-4-5-20251001': {
+          inputTokens: 534,
+          outputTokens: 58,
+          cacheReadInputTokens: 16435,
+          cacheCreationInputTokens: 8160,
+          webSearchRequests: 0,
+          costUSD: 0.0187875,
+          contextWindow: 200000,
+        },
+      },
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  assert.deepEqual(claudeAdapter.finalize(state), {
+    ok: true,
+    text: 'pong',
+    usage: {
+      // 534 + 8160 + 16435, not the final call's 10 + 8160 + 16435.
+      input: 25129,
+      output: 58,
+      total: 25187,
+      cached: 16435,
+    },
+    costUsd: 0.0187875,
+    modelUsage: [
+      {
+        model: 'claude-haiku-4-5-20251001',
+        input: 534,
+        output: 58,
+        cacheRead: 16435,
+        cacheCreation: 8160,
+        webSearchRequests: 0,
+        costUsd: 0.0187875,
+      },
+    ],
+    permissionDenials: [],
+  });
+});
+
+void test('claudeAdapter sums usage across every model a run drove', () => {
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Done',
+      total_cost_usd: 1.5,
+      modelUsage: {
+        'claude-opus-5': {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 5,
+          cacheCreationInputTokens: 3,
+          costUSD: 1.4,
+        },
+        'claude-haiku-4-5': {
+          inputTokens: 10,
+          outputTokens: 2,
+          costUSD: 0.1,
+        },
+        // Malformed entries must not cost the run its accounting.
+        '': { costUSD: 99 },
+        'claude-broken': null,
+      },
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  const outcome = claudeAdapter.finalize(state);
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.modelUsage?.length, 2);
+  assert.deepEqual(outcome.usage, {
+    input: 100 + 5 + 3 + 10,
+    output: 22,
+    total: 140,
+    cached: 5,
+  });
+  assert.equal(outcome.costUsd, 1.5);
+});
+
+void test('claudeAdapter omits cost and model usage when the CLI reports none', () => {
+  const state: EngineState = {
+    finalResult: {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Done',
+      usage: { input_tokens: 4, output_tokens: 1 },
+    },
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+
+  const outcome = claudeAdapter.finalize(state);
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  // Absent rather than zero: a zero cost is a claim the run was free.
+  assert.equal('costUsd' in outcome, false);
+  assert.equal('modelUsage' in outcome, false);
+  // Falls back to the final call's usage so a CLI without modelUsage keeps
+  // the previous behaviour.
+  assert.deepEqual(outcome.usage, {
+    input: 4,
+    output: 1,
+    total: 5,
+    cached: 0,
+  });
+});
+
 void test('claudeAdapter normalizes terminal permission denials', () => {
   const state: EngineState = {
     finalResult: {

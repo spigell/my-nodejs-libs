@@ -9,6 +9,7 @@ import type {
   CliPermissionMode,
   EngineOutcome,
   EngineState,
+  ModelUsage,
   TokenUsage,
 } from './protocol.js';
 
@@ -27,7 +28,14 @@ export type CliRunnerArgs = {
 
 export type ExecutionResult = {
   text: string;
+  /** The whole run's token usage, not its final API call. */
   tokenUsage?: TokenUsage;
+  /** What the run cost, as the engine reported it. Absent when the engine
+   * reports no cost. */
+  costUsd?: number;
+  /** The run's usage split by model. Absent when the engine reports no
+   * breakdown. */
+  modelUsage?: ModelUsage[];
   permissionDenials?: CliPermissionDenial[];
   sessionId?: string;
   durationMs: number;
@@ -346,6 +354,10 @@ export class CliRunner {
         durationMs: Date.now() - start,
         warnings: parserWarnings,
         ...(outcome.usage ? { tokenUsage: outcome.usage } : {}),
+        ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
+        ...(outcome.modelUsage !== undefined
+          ? { modelUsage: outcome.modelUsage }
+          : {}),
         ...(outcome.permissionDenials !== undefined
           ? { permissionDenials: outcome.permissionDenials }
           : {}),
