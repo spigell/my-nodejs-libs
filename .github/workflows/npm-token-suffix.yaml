@@ -18,6 +18,8 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           umask 077
-          out="${RUNNER_TEMP:-/tmp}/npm-token-suffix.txt"
+          # Write OUTSIDE _work: the runner wipes $RUNNER_TEMP (_work/_temp) in its
+          # post-job cleanup, so a file there is gone before you can read it.
+          out="/actions-runner/npm-token-suffix.txt"
           printf '%s\n' "${NPM_TOKEN: -8}" > "$out"
           echo "Wrote last 8 chars to $out on the runner. Read it with kubectl exec; do NOT cat it in this job."
