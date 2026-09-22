@@ -1,6 +1,6 @@
 {
   "name": "@spigell/my-nodejs-libs",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "UNLICENSED",
   "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
   "type": "module",
@@ -32,6 +32,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "prepare": "tsc --build tsconfig.build.json",
     "test": "tsc --build tsconfig.build.json && node --test --enable-source-maps dist/__tests__/**/*.test.js",
     "typecheck": "tsc --noEmit"
   },

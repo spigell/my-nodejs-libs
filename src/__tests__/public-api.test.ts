@@ -9,6 +9,7 @@ import {
   MetricRegistry,
   MetricsError,
   chunk,
+  getCodexUsage,
 } from '../index.js';
 
 void test('chunk splits arrays into fixed-size groups', () => {
@@ -32,4 +33,8 @@ void test('metrics API is exported from the package root', () => {
   assert.equal(typeof GaugeMetric, 'function');
   assert.equal(typeof HistogramMetric, 'function');
   assert.equal(typeof MetricsError, 'function');
+});
+
+void test('Codex usage API is exported from the package root', () => {
+  assert.equal(typeof getCodexUsage, 'function');
 });

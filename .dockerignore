@@ -1,0 +1,18 @@
+# Deny everything, then re-include exactly the build inputs.
+#
+# This tree is consumed as the `libs` named build context by
+# reforge/runner/Dockerfile.runtime (COPY --from=libs). Without an allowlist
+# the context is 144 MB, 142 MB of which is node_modules.
+#
+# Keep this list in sync with the my-nodejs-libs entries in SOURCE_PATHS in
+# reforge/runner/scripts/build-runtime-images.mjs. The revision hash is
+# computed from SOURCE_PATHS while the image is built from this context; if
+# they diverge, the tag describes a tree the image does not contain.
+*
+
+!package.json
+!yarn.lock
+!tsconfig.json
+# The libs package compiles through its own build config, not the base one.
+!tsconfig.build.json
+!src

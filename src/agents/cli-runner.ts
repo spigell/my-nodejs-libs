@@ -24,6 +24,14 @@ export type CliRunnerArgs = {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   logger?: CliRunnerLogger;
+  /**
+   * Called for each parsed event as it streams in, before the adapter sees it.
+   *
+   * Lets a caller forward live progress somewhere without waiting for the run
+   * to finish. It must never throw: a subscriber's failure is not the run's
+   * failure, so exceptions are caught and logged rather than propagated.
+   */
+  onEvent?: (event: unknown) => void;
 };
 
 export type ExecutionResult = {
@@ -219,6 +227,19 @@ export class CliRunner {
       outputMode === 'jsonl'
         ? createJsonlParser({
             onLine: (event) => {
+              if (this.args.onEvent) {
+                try {
+                  this.args.onEvent(event);
+                } catch (error) {
+                  // A subscriber that throws must not kill the run: the agent's
+                  // work matters more than the progress feed watching it.
+                  logger.info(
+                    `onEvent subscriber threw: ${
+                      error instanceof Error ? error.message : String(error)
+                    }`,
+                  );
+                }
+              }
               this.args.adapter.consumeEvent(state, event);
             },
             onInvalidLine: (line) => {
