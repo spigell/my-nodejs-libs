@@ -480,6 +480,8 @@ void test('agyAdapter builds print args with timeout and conversation id', () =>
     }),
     [
       '--dangerously-skip-permissions',
+      '--output-format',
+      'stream-json',
       '-p',
       'Say hello',
       '--print-timeout',
@@ -490,34 +492,9 @@ void test('agyAdapter builds print args with timeout and conversation id', () =>
   );
 });
 
-void test('agyAdapter finalizes plain stdout output', () => {
-  const state: EngineState = {
-    finalResult: null,
-    lastAssistantText: '',
-    rawStdout: '\nAgy result\n',
-    rawStderr: '',
-  };
-
-  assert.deepEqual(agyAdapter.finalize(state), {
-    ok: true,
-    text: 'Agy result',
-    usage: null,
-  });
-});
-
-void test('agyAdapter rejects empty stdout output', () => {
-  const state: EngineState = {
-    finalResult: null,
-    lastAssistantText: '',
-    rawStdout: ' \n\t ',
-    rawStderr: '',
-  };
-
-  assert.deepEqual(agyAdapter.finalize(state), {
-    ok: false,
-    error: 'Agy command succeeded without producing any stdout output',
-  });
-});
+// Agy no longer finalizes from raw stdout: it runs in stream-json mode so the
+// run's token usage can be read off the terminal `result` event. The parsing
+// contract is covered in agy-adapter.test.ts.
 
 void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {
   const textAdapter: CliAdapter = {

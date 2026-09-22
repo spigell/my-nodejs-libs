@@ -32,6 +32,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "prepare": "tsc --build tsconfig.build.json",
     "test": "tsc --build tsconfig.build.json && node --test --enable-source-maps dist/__tests__/**/*.test.js",
     "typecheck": "tsc --noEmit"
   },

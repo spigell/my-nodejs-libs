@@ -3,6 +3,8 @@ export type TokenUsage = {
   output?: number;
   total?: number;
   cached?: number;
+  /** Reasoning tokens, when the engine bills them separately from output. */
+  thinking?: number;
 };
 
 /**
@@ -35,6 +37,13 @@ export type EngineState = {
   sessionId?: string;
   rawStdout: string;
   rawStderr: string;
+  /**
+   * Usage for the latest turn alone, when the engine reports it separately
+   * from a conversation total. Agy's terminal result is cumulative over the
+   * whole conversation, so a resumed run would otherwise re-bill every earlier
+   * turn.
+   */
+  perTurnUsage?: TokenUsage;
 };
 
 export type EngineOutcome =
