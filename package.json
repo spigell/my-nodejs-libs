@@ -1,6 +1,6 @@
 {
   "name": "@spigell/my-nodejs-libs",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "UNLICENSED",
   "description": "Shared Node.js TypeScript utilities for workers, HTTP, logging, metrics, and messaging.",
   "type": "module",
@@ -10,6 +10,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-usage-proxy": "./dist/bin/agent-usage-proxy.js"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
