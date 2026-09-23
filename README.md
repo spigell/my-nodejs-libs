@@ -263,6 +263,88 @@ servers outside the supplied configuration. Claude execution results expose
 the terminal event's normalized `permissionDenials`, including the denied tool
 name, tool-use ID, and structured input.
 
+## Codex usage and token refresh
+
+`getCodexUsage()` reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`)
+and refreshes it the way the Codex CLI does. The refresh response carries no
+`expires_in`, so expiry comes from the access token's own JWT `exp` claim: it
+refreshes when that is within five minutes, and falls back to a `last_refresh`
+older than eight days when the token is not a readable JWT. A 401 from the
+usage endpoint forces one refresh and one retry.
+
+The refresh is a JSON-encoded `refresh_token` grant against
+`https://auth.openai.com/oauth/token` with the Codex CLI client id. Rotated
+tokens and `last_refresh` are written atomically through any isolation symlink
+to the real `auth.json`, preserving its file mode.
+
+Codex refresh tokens rotate and may be spent only once, so the file is re-read
+before refreshing and a refresh another process already completed is adopted
+instead of repeated. Failures throw `CodexTokenRefreshError`: `permanent` is
+true for `refresh_token_expired`, `refresh_token_reused`,
+`refresh_token_invalidated`, a 401, or `400 invalid_grant`, all of which need a
+new `codex login`. Anything else is transient and safe to retry. Passing an
+explicit `accessToken` and `accountId` disables refresh and persistence.
+
+## Agent usage proxy
+
+The package ships an `agent-usage-proxy` bin: a small HTTP service that exposes
+one agent's usage from the pod that owns that agent's credentials. It keeps
+only an in-memory cache and has no durable store.
+
+```bash
+USAGE_AGENT=codex PORT=8080 agent-usage-proxy
+curl -s localhost:8080/usage
+```
+
+| Variable                 | Default                     | Meaning                                    |
+| ------------------------ | --------------------------- | ------------------------------------------ |
+| `USAGE_AGENT`            | required                    | `claude`, `codex`, or `agy`.               |
+| `PORT`                   | `8080`                      | HTTP listen port.                          |
+| `USAGE_CACHE_TTL_MS`     | `30000`; `120000` for `agy` | Lifetime of a cached usage response.       |
+| `USAGE_POLL_INTERVAL_MS` | `60000`; `300000` for `agy` | Background poll interval; `0` disables it. |
+| `LOG_LEVEL`              | `info`                      | Winston log level.                         |
+| `CLAUDE_CONFIG_DIR`      | `~/.claude`                 | Claude credentials (`claude` only).        |
+| `CODEX_HOME`             | `~/.codex`                  | Codex `auth.json` (`codex` only).          |
+
+agy has no credential variable: `getAgyUsage()` spawns the `agy` CLI, which
+reads its own `~/.gemini`, so the proxy must run where that CLI is installed.
+That spawn costs about 3.5 s, which is why agy's cache lifetime is longer.
+
+- `GET /usage` returns the agent's native payload (`ClaudeUsage`,
+  `CodexUsage`, or `AgyUsage`). An upstream failure returns `502` with
+  `{ agent, error }`, never a token. A Codex refresh token that can no longer
+  be used adds `reauth_required: true`, meaning retrying will not help until
+  someone logs in again.
+- `GET /healthz` and `GET /metrics` come from the shared `Server`.
+
+The Claude and Codex clients rotate OAuth tokens only as a side effect of
+fetching usage, so something has to fetch on a schedule. The proxy does it
+itself: a background poll goes upstream on start and then every
+`USAGE_POLL_INTERVAL_MS`, bypassing the cache, so tokens stay rotated even when
+nobody calls `/usage`. A tick is skipped while the previous one is running.
+
+`/healthz` deliberately never fails on upstream state. In a sidecar, a failing
+readiness probe takes the whole pod out of every Service, and a spent refresh
+token would crash-loop a liveness restart without fixing anything. `/healthz`
+therefore stays `200`, and its `error` field carries the last poll failure,
+prefixed `reauth required:` when a new login is needed. Alert on the metrics
+instead:
+
+| Metric                                                         | Meaning                            |
+| -------------------------------------------------------------- | ---------------------------------- |
+| `agent_usage_proxy_info{agent}`                                | Always `1`; identifies the agent.  |
+| `agent_usage_proxy_poll_healthy{agent}`                        | `1` if the last poll succeeded.    |
+| `agent_usage_proxy_poll_last_success_timestamp_seconds{agent}` | Unix time of the last success.     |
+| `agent_usage_proxy_reauth_required{agent}`                     | `1` when credentials need a login. |
+
+Concurrent requests on a cache miss share one upstream call, and failures are
+not cached. A configuration error exits with status 2. Claude and Codex rotate
+credentials on disk, so the credential home must be mounted writable.
+
+`createAgentUsageProxy()`, `CachedUsageLoader`, `UsagePoller`, and
+`createUsageHandler()` are exported for services that embed the proxy rather
+than run the bin.
+
 ## Development commands
 
 ```bash
@@ -284,6 +366,15 @@ Release steps:
 3. GitHub Actions publishes the package to `registry.npmjs.org`.
 
 The release workflow is defined in [.github/workflows/tags-package-release.yaml](/project/my-shared-infra/my-nodejs-libs/.github/workflows/tags-package-release.yaml).
+
+Consumers do not depend on that npm publish, which has failed since v0.3.0.
+Images build from the git tag instead: `reforge/runner` takes it as a named
+build context, and the `agent-usage-proxy` image in `spigell/my-images` fetches
+it, builds, and prunes to production dependencies. Both fetch the tag from
+GitHub, so push it before bumping either pin. Do not use
+`npm install -g git+https://…`: npm skips devDependencies when it runs `prepare`
+for a global git install, so `tsc` is missing and the install fails. Bump
+`version` in `package.json` before tagging so the tag and the package agree.
 
 ## Notes and caveats
 
