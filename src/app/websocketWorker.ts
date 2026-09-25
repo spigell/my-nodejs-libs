@@ -39,6 +39,8 @@ export abstract class WebSocketWorker extends Worker {
   private readonly maxDelay: number = 30000; // Max delay (30s)
   private heartbeatInterval: NodeJS.Timeout | undefined; // Interval for keepalive
   private reconnectTimeout: NodeJS.Timeout | undefined;
+  private stopped = false;
+  private started = false;
 
   constructor(
     name: string,
@@ -53,73 +55,106 @@ export abstract class WebSocketWorker extends Worker {
   }
 
   async start() {
-    await this.prepare();
+    if (this.started || this.stopped) {
+      return;
+    }
+    this.started = true;
+    try {
+      await this.prepare();
+    } catch (error) {
+      this.started = false;
+      throw error;
+    }
 
-    this.connect();
+    if (!this.stopped) {
+      this.connect();
+    }
+  }
+
+  protected createWebSocket(): WebSocket {
+    return new WebSocket(this.url, {
+      headers: {
+        [X_APP_ID_HEADER]: this.appId,
+      },
+    });
   }
 
   /**
    * Connects to the WebSocket server and sets up event handlers
    */
   private connect() {
+    if (this.stopped) {
+      return;
+    }
     this.logger.info('WS: connection', {
       url: this.url,
     });
-    const socket = new WebSocket(this.url, {
-      headers: {
-        [X_APP_ID_HEADER]: this.appId,
-      },
-    }) as ManagedClientWebSocket;
+    const socket = this.createWebSocket() as ManagedClientWebSocket;
     this.ws = socket;
 
-    this.ws.on('open', () => this.onOpen());
-    this.ws.on('message', (data) => this.enqueueMessage(rawDataToString(data)));
-    this.ws.on('pong', () => this.onPong());
-    this.ws.on('close', () => this.onClose());
-    this.ws.on('error', (err) => this.onError(err));
+    socket.on('open', () => this.onOpen(socket));
+    socket.on('message', (data) => {
+      if (!this.stopped && this.ws === socket) {
+        this.enqueueMessage(rawDataToString(data));
+      }
+    });
+    socket.on('pong', () => this.onPong(socket));
+    socket.on('close', () => this.onClose(socket));
+    socket.on('error', (err) => this.onError(socket, err));
 
-    this.ws.isAlive = true;
+    socket.isAlive = true;
   }
 
   /**
    * Handles WebSocket connection opening
    */
-  private onOpen() {
+  private onOpen(socket: ManagedClientWebSocket) {
+    if (this.stopped || this.ws !== socket) {
+      return;
+    }
     this.logger.info('WS: connected', {
       url: this.url,
     });
     this.reconnectDelay = 1000; // Reset backoff delay on successful connection
 
-    this.startKeepAlive(); // Start keepalive pings
+    this.startKeepAlive(socket); // Start keepalive pings
   }
 
   /**
    * Handles WebSocket disconnection & triggers reconnection
    */
-  private onClose() {
+  private onClose(socket: ManagedClientWebSocket) {
+    if (this.ws !== socket) {
+      return;
+    }
     this.logger.warn('WS: disconnected', {
       url: this.url,
     });
     this.stopKeepAlive();
-    this.reconnect();
+    if (!this.stopped) {
+      this.reconnect();
+    }
   }
 
   /**
    * Handles WebSocket errors
    */
-  private onError(err: Error) {
+  private onError(socket: ManagedClientWebSocket, err: Error) {
+    if (this.stopped || this.ws !== socket) {
+      return;
+    }
     this.logger.error('WS: got error', {
       url: this.url,
       errorMessage: err,
     });
-    this.ws.close(); // Ensure clean reconnect
+    socket.close(); // Ensure clean reconnect
   }
 
   /**
    * Reconnects with exponential backoff
    */
   private reconnect() {
-    if (this.reconnectTimeout) {
+    if (this.stopped || this.reconnectTimeout) {
       return;
     }
 
@@ -132,27 +167,32 @@ export abstract class WebSocketWorker extends Worker {
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = undefined;
-      this.connect();
-      this.reconnectDelay *= 2; // Exponential backoff (max 30s)
+      if (!this.stopped) {
+        this.connect();
+        this.reconnectDelay *= 2; // Exponential backoff (max 30s)
+      }
     }, delay);
   }
 
   /**
    * Start keepalive pings every 30 seconds
    */
-  private startKeepAlive() {
+  private startKeepAlive(socket: ManagedClientWebSocket) {
     this.stopKeepAlive(); // Ensure no duplicate intervals
 
     this.heartbeatInterval = setInterval(() => {
-      if (this.ws.isAlive === false) {
+      if (this.stopped || this.ws !== socket) {
+        return;
+      }
+      if (socket.isAlive === false) {
         this.logger.warn('WS: no pong', {
           url: this.url,
         });
-        return this.ws.terminate();
+        return socket.terminate();
       }
 
-      this.ws.isAlive = false;
-      this.ws.ping(); // Send ping
+      socket.isAlive = false;
+      socket.ping(); // Send ping
     }, 3000);
   }
 
@@ -162,14 +202,17 @@ export abstract class WebSocketWorker extends Worker {
   private stopKeepAlive() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
     }
   }
 
   /**
    * Handles pong response (Client is alive)
    */
-  private onPong() {
-    this.ws.isAlive = true;
+  private onPong(socket: ManagedClientWebSocket) {
+    if (!this.stopped && this.ws === socket) {
+      socket.isAlive = true;
+    }
   }
 
   private enqueueMessage(message: string) {
@@ -260,6 +303,10 @@ export abstract class WebSocketWorker extends Worker {
   }
 
   public stop(): void {
+    if (this.stopped) {
+      return;
+    }
+    this.stopped = true;
     this.stopKeepAlive();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
