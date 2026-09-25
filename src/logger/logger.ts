@@ -1,12 +1,11 @@
 import { Logger, createLogger, format, transports } from 'winston';
 import { randomBytes } from 'crypto';
 import { inspect } from 'util';
+import { isSensitiveKey } from './sensitive.js';
 
 const timestampFormat = 'MMM-DD-YYYY HH:mm:ss.SSS';
 const REDACTED_VALUE = '[REDACTED]';
 const MAX_SANITIZE_DEPTH = 5;
-const SENSITIVE_KEY_PATTERN =
-  /(authorization|cookie|password|passwd|secret|token|credential|api[-_]?key|private[-_]?key|session)/i;
 
 type LogPrimitive = boolean | null | number | string;
 type LogValue = LogPrimitive | LogValue[] | { [key: string]: LogValue };
@@ -84,7 +83,7 @@ const sanitizeRecord = (
 
   const sanitized: LogRecord = {};
   for (const [key, entryValue] of Object.entries(value)) {
-    if (SENSITIVE_KEY_PATTERN.test(key)) {
+    if (isSensitiveKey(key)) {
       sanitized[key] = REDACTED_VALUE;
       continue;
     }
