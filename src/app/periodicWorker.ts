@@ -16,6 +16,8 @@ const metrics: Record<string, MetricDefinition> = {
 export abstract class PeriodicWorker extends Worker {
   protected interval: number;
   private cycleTimer: NodeJS.Timeout | undefined;
+  private startPromise: Promise<void> | undefined;
+  private generation = 0;
 
   constructor(
     name: string,
@@ -26,7 +28,17 @@ export abstract class PeriodicWorker extends Worker {
     interval: number,
   ) {
     super(name, appId, prom, logging, config);
-    this.interval = interval * 1000;
+    const intervalMs = interval * 1000;
+    if (
+      !Number.isFinite(intervalMs) ||
+      intervalMs < 1 ||
+      intervalMs > 2_147_483_647
+    ) {
+      throw new RangeError(
+        'PeriodicWorker interval must be a positive finite number of seconds within the supported timer range',
+      );
+    }
+    this.interval = intervalMs;
     this.prom.registerMetric(
       APP_PERIODIC_WORKER_CYCLE_DURATION_KEY,
       metrics[APP_PERIODIC_WORKER_CYCLE_DURATION_KEY]!,
@@ -34,19 +46,34 @@ export abstract class PeriodicWorker extends Worker {
     );
   }
 
-  public async start(): Promise<void> {
+  /** Repeated starts share pending preparation and do nothing while running. */
+  public start(): Promise<void> {
+    if (this.cycleTimer) return Promise.resolve();
+    if (this.startPromise) return this.startPromise;
+
+    const generation = ++this.generation;
     this.logger.info('Starting periodic run()', {
       interval: `${this.interval}ms`,
     });
 
-    await this.prepare();
-
-    this.cycleTimer = setInterval(() => {
-      void this.runCycle();
-    }, this.interval);
+    this.startPromise = Promise.resolve()
+      .then(() => this.prepare())
+      .then(() => {
+        if (generation === this.generation) {
+          this.cycleTimer = setInterval(() => {
+            void this.runCycle();
+          }, this.interval);
+        }
+      })
+      .finally(() => {
+        if (generation === this.generation) this.startPromise = undefined;
+      });
+    return this.startPromise;
   }
 
   public stop(): void {
+    this.generation++;
+    this.startPromise = undefined;
     if (this.cycleTimer) {
       clearInterval(this.cycleTimer);
       this.cycleTimer = undefined;
