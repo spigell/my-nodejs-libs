@@ -70,12 +70,16 @@ export type RawOutputInspectionArgs = {
 
 export type CliPermissionMode = 'default' | 'acceptEdits' | 'dontAsk' | 'plan';
 
+export type CliReasoningEffort = 'low' | 'medium' | 'high';
+
 export type CliBuildArgs = {
   prompt: string;
   sessionId?: string;
   model?: string;
   printTimeoutMs?: number;
   includeDirectories?: readonly string[];
+  /** Adapters whose CLI has no effort control ignore it. */
+  reasoningEffort?: CliReasoningEffort;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   systemPromptFile?: string;

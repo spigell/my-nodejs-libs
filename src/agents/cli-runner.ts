@@ -7,6 +7,7 @@ import type {
   CliBuildArgs,
   CliPermissionDenial,
   CliPermissionMode,
+  CliReasoningEffort,
   EngineOutcome,
   EngineState,
   ModelUsage,
@@ -55,6 +56,7 @@ export type CliRunOptions = {
   model?: string;
   signal?: AbortSignal;
   includeDirectories?: readonly string[];
+  reasoningEffort?: CliReasoningEffort;
   mcpConfigPath?: string;
   strictMcpConfig?: boolean;
   tools?: readonly string[];
@@ -112,6 +114,9 @@ export class CliRunner {
     buildArgs.printTimeoutMs = normalizedOptions.printTimeoutMs ?? timeoutMs;
     if (normalizedOptions.includeDirectories !== undefined) {
       buildArgs.includeDirectories = normalizedOptions.includeDirectories;
+    }
+    if (normalizedOptions.reasoningEffort !== undefined) {
+      buildArgs.reasoningEffort = normalizedOptions.reasoningEffort;
     }
     if (normalizedOptions.mcpConfigPath !== undefined) {
       buildArgs.mcpConfigPath = normalizedOptions.mcpConfigPath;
