@@ -82,7 +82,9 @@ function normalizeUsage(usage: unknown): TokenUsage | null {
  * against a guessed list of error strings.
  */
 function isSuccessStatus(status: unknown): boolean {
-  return typeof status === 'string' && status.trim().toUpperCase() === 'SUCCESS';
+  return (
+    typeof status === 'string' && status.trim().toUpperCase() === 'SUCCESS'
+  );
 }
 
 export const agyAdapter: CliAdapter = {
@@ -102,6 +104,25 @@ export const agyAdapter: CliAdapter = {
 
     if (args.sessionId) {
       cliArgs.push('--conversation', args.sessionId);
+    }
+
+    // A display name ("Gemini 3.8 Flash (High)") or an id from `agy models`.
+    // It overrides settings.json, and the init event then reports the model.
+    if (args.model) {
+      cliArgs.push('--model', args.model);
+    }
+
+    // Adds each directory to agy's workspace, so a task's additional
+    // workspaces are part of the session rather than paths outside it.
+    for (const directory of args.includeDirectories ?? []) {
+      cliArgs.push('--add-dir', directory);
+    }
+
+    // Measured on agy 1.2.7: `--effort high` on "Gemini 3.8 Flash (Low)"
+    // turned thinking on (0 -> 29 thinking tokens), so it overrides the
+    // effort a model's display name implies.
+    if (args.reasoningEffort) {
+      cliArgs.push('--effort', args.reasoningEffort);
     }
 
     return cliArgs;

@@ -65,11 +65,44 @@ void test('agyAdapter asks for stream-json so events can be parsed at all', () =
 });
 
 void test('agyAdapter resumes a conversation when given a session id', () => {
-  const args = agyAdapter.buildCliArgs({ prompt: 'again', sessionId: 'abc-123' });
+  const args = agyAdapter.buildCliArgs({
+    prompt: 'again',
+    sessionId: 'abc-123',
+  });
 
   const index = args.indexOf('--conversation');
   assert.notEqual(index, -1);
   assert.equal(args[index + 1], 'abc-123');
+});
+
+void test('agyAdapter forwards model, effort and additional directories as flags', () => {
+  const args = agyAdapter.buildCliArgs({
+    prompt: 'work',
+    model: 'Gemini 3.8 Flash (High)',
+    reasoningEffort: 'high',
+    includeDirectories: ['/work/extra-a', '/work/extra-b'],
+  });
+
+  assert.deepEqual(
+    args.slice(args.indexOf('--model'), args.indexOf('--model') + 2),
+    ['--model', 'Gemini 3.8 Flash (High)'],
+  );
+  assert.deepEqual(
+    args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2),
+    ['--effort', 'high'],
+  );
+  const addDirs = args.flatMap((arg, index) =>
+    arg === '--add-dir' ? [args[index + 1]] : [],
+  );
+  assert.deepEqual(addDirs, ['/work/extra-a', '/work/extra-b']);
+});
+
+void test('agyAdapter leaves model and effort to settings when not given', () => {
+  const args = agyAdapter.buildCliArgs({ prompt: 'work' });
+
+  assert.equal(args.includes('--model'), false);
+  assert.equal(args.includes('--effort'), false);
+  assert.equal(args.includes('--add-dir'), false);
 });
 
 void test('agyAdapter records the conversation id from the init event', () => {
@@ -196,7 +229,11 @@ void test('agyAdapter prefers the result response over accumulated deltas', () =
     },
     {
       event: 'result',
-      result: { conversation_id: 'x', status: 'SUCCESS', response: 'the whole answer' },
+      result: {
+        conversation_id: 'x',
+        status: 'SUCCESS',
+        response: 'the whole answer',
+      },
     },
   ]);
 
