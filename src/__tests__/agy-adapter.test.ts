@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agyAdapter } from '../agents/agy-adapter.js';
+import { agyAdapter, resolveAgyModelSelection } from '../agents/agy-adapter.js';
 import type { EngineState } from '../agents/protocol.js';
 
 const freshState = (): EngineState => ({
@@ -75,26 +75,74 @@ void test('agyAdapter resumes a conversation when given a session id', () => {
   assert.equal(args[index + 1], 'abc-123');
 });
 
-void test('agyAdapter forwards model, effort and additional directories as flags', () => {
+const flagValue = (args: string[], flag: string): string | undefined => {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
+};
+
+void test('agyAdapter forwards the model and additional directories as flags', () => {
   const args = agyAdapter.buildCliArgs({
     prompt: 'work',
     model: 'Gemini 3.8 Flash (High)',
-    reasoningEffort: 'high',
     includeDirectories: ['/work/extra-a', '/work/extra-b'],
   });
 
-  assert.deepEqual(
-    args.slice(args.indexOf('--model'), args.indexOf('--model') + 2),
-    ['--model', 'Gemini 3.8 Flash (High)'],
-  );
-  assert.deepEqual(
-    args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2),
-    ['--effort', 'high'],
-  );
+  assert.equal(flagValue(args, '--model'), 'Gemini 3.8 Flash (High)');
   const addDirs = args.flatMap((arg, index) =>
     arg === '--add-dir' ? [args[index + 1]] : [],
   );
   assert.deepEqual(addDirs, ['/work/extra-a', '/work/extra-b']);
+});
+
+void test('agyAdapter applies effort by switching a display name variant, never with --effort', () => {
+  // agy 1.2.7 rejects --effort next to any display name.
+  const args = agyAdapter.buildCliArgs({
+    prompt: 'work',
+    model: 'Gemini 3.8 Flash (Medium)',
+    reasoningEffort: 'high',
+  });
+
+  assert.equal(flagValue(args, '--model'), 'Gemini 3.8 Flash (High)');
+  assert.equal(args.includes('--effort'), false);
+});
+
+void test('agyAdapter passes --effort only where agy accepts it', () => {
+  const bareId = agyAdapter.buildCliArgs({
+    prompt: 'work',
+    model: 'gemini-3.8-flash',
+    reasoningEffort: 'low',
+  });
+  assert.equal(flagValue(bareId, '--model'), 'gemini-3.8-flash');
+  assert.equal(flagValue(bareId, '--effort'), 'low');
+
+  const noModel = agyAdapter.buildCliArgs({
+    prompt: 'work',
+    reasoningEffort: 'high',
+  });
+  assert.equal(noModel.includes('--model'), false);
+  assert.equal(flagValue(noModel, '--effort'), 'high');
+});
+
+void test('resolveAgyModelSelection swaps effort variants and reports what it cannot apply', () => {
+  assert.deepEqual(resolveAgyModelSelection('gemini-3.8-flash-high', 'low'), {
+    model: 'gemini-3.8-flash-low',
+    effortDropped: false,
+  });
+  assert.deepEqual(resolveAgyModelSelection('Gemini 3.1 Pro (Low)', 'high'), {
+    model: 'Gemini 3.1 Pro (High)',
+    effortDropped: false,
+  });
+  assert.deepEqual(
+    resolveAgyModelSelection('Claude Sonnet 4.6 (Thinking)', 'high'),
+    { model: 'Claude Sonnet 4.6 (Thinking)', effortDropped: true },
+  );
+  assert.deepEqual(
+    resolveAgyModelSelection('Gemini 3.8 Flash (Medium)', undefined),
+    {
+      model: 'Gemini 3.8 Flash (Medium)',
+      effortDropped: false,
+    },
+  );
 });
 
 void test('agyAdapter leaves model and effort to settings when not given', () => {

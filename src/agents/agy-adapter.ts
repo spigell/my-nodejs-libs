@@ -87,6 +87,67 @@ function isSuccessStatus(status: unknown): boolean {
   );
 }
 
+export type AgyReasoningEffort = 'low' | 'medium' | 'high';
+
+export type AgyModelSelection = {
+  /** What to pass as `--model`; undefined leaves settings.json in charge. */
+  model?: string;
+  /** What to pass as `--effort`. */
+  effort?: AgyReasoningEffort;
+  /**
+   * True when an effort was asked for but cannot be applied: the model is a
+   * display name with no effort variant, e.g. "Claude Sonnet 4.6 (Thinking)".
+   */
+  effortDropped: boolean;
+};
+
+const DISPLAY_EFFORT_SUFFIX = /^(.*\S)\s*\((low|medium|high)\)$/i;
+const ID_EFFORT_SUFFIX = /^([a-z0-9][a-z0-9.-]*)-(low|medium|high)$/;
+const MODEL_ID = /^[a-z0-9][a-z0-9.-]*$/;
+
+const capitalize = (value: string): string =>
+  value.charAt(0).toUpperCase() + value.slice(1);
+
+/**
+ * Chooses the `--model`/`--effort` pair agy accepts for a model and effort.
+ *
+ * agy 1.2.7 encodes effort in the model: `agy models` lists
+ * "Gemini 3.8 Flash (High)" with the id `gemini-3.8-flash-high`. Measured
+ * against it: any display name combined with `--effort` is rejected ("--effort
+ * is not supported for model ..."), even one without a suffix, while a bare id
+ * (`gemini-3.8-flash`) or no model at all accepts `--effort`. So an effort is
+ * applied by switching to the matching variant when the model names one, and
+ * by `--effort` only where agy takes it.
+ */
+export function resolveAgyModelSelection(
+  model: string | undefined,
+  effort: AgyReasoningEffort | undefined,
+): AgyModelSelection {
+  const trimmed = model?.trim() || undefined;
+  if (!effort) {
+    return { ...(trimmed ? { model: trimmed } : {}), effortDropped: false };
+  }
+  if (!trimmed) {
+    return { effort, effortDropped: false };
+  }
+
+  const display = DISPLAY_EFFORT_SUFFIX.exec(trimmed);
+  if (display) {
+    return {
+      model: `${display[1]} (${capitalize(effort)})`,
+      effortDropped: false,
+    };
+  }
+  const id = ID_EFFORT_SUFFIX.exec(trimmed);
+  if (id) {
+    return { model: `${id[1]}-${effort}`, effortDropped: false };
+  }
+  if (MODEL_ID.test(trimmed)) {
+    return { model: trimmed, effort, effortDropped: false };
+  }
+  return { model: trimmed, effortDropped: true };
+}
+
 export const agyAdapter: CliAdapter = {
   name: 'agy',
   outputMode: 'jsonl',
@@ -106,10 +167,15 @@ export const agyAdapter: CliAdapter = {
       cliArgs.push('--conversation', args.sessionId);
     }
 
+    const selection = resolveAgyModelSelection(
+      args.model,
+      args.reasoningEffort,
+    );
+
     // A display name ("Gemini 3.8 Flash (High)") or an id from `agy models`.
     // It overrides settings.json, and the init event then reports the model.
-    if (args.model) {
-      cliArgs.push('--model', args.model);
+    if (selection.model) {
+      cliArgs.push('--model', selection.model);
     }
 
     // Adds each directory to agy's workspace, so a task's additional
@@ -118,11 +184,8 @@ export const agyAdapter: CliAdapter = {
       cliArgs.push('--add-dir', directory);
     }
 
-    // Measured on agy 1.2.7: `--effort high` on "Gemini 3.8 Flash (Low)"
-    // turned thinking on (0 -> 29 thinking tokens), so it overrides the
-    // effort a model's display name implies.
-    if (args.reasoningEffort) {
-      cliArgs.push('--effort', args.reasoningEffort);
+    if (selection.effort) {
+      cliArgs.push('--effort', selection.effort);
     }
 
     return cliArgs;
