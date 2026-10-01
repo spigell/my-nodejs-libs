@@ -88,7 +88,7 @@ export async function createAgyIsolation(args: {
   if (args.mcpConfig !== undefined) {
     await fs.writeFile(
       mcpConfigPath,
-      `${JSON.stringify(args.mcpConfig, null, 2)}\n`,
+      `${JSON.stringify(normalizeAgyMcpConfig(args.mcpConfig), null, 2)}\n`,
       'utf8',
     );
   }
@@ -116,6 +116,52 @@ export async function createAgyIsolation(args: {
     oauthTokenPath,
     cleanup: () => Promise.resolve(),
   };
+}
+
+/**
+ * agy reads a per-server MCP call timeout only as `timeoutSeconds`, in
+ * seconds; it ignores `timeout`, and without `timeoutSeconds` it cuts every
+ * MCP tool call at 3 minutes (google-antigravity/antigravity-cli#780, agy
+ * 1.1.16+). A server given the Claude-style `timeout` in milliseconds gets
+ * the matching `timeoutSeconds`, rounded up, unless it already has one; the
+ * `timeout` key itself is dropped. Anything that is not an `mcpServers`
+ * object is written as given.
+ */
+export function normalizeAgyMcpConfig(mcpConfig: unknown): unknown {
+  const servers = mcpServersOf(mcpConfig);
+  if (!servers) {
+    return mcpConfig;
+  }
+  return {
+    ...(mcpConfig as Record<string, unknown>),
+    mcpServers: Object.fromEntries(
+      Object.entries(servers).map(([name, server]) => {
+        if (!isRecord(server) || !('timeout' in server)) {
+          return [name, server];
+        }
+        const { timeout, ...rest } = server;
+        if (rest.timeoutSeconds === undefined && isPositiveNumber(timeout)) {
+          rest.timeoutSeconds = Math.ceil(timeout / 1000);
+        }
+        return [name, rest];
+      }),
+    ),
+  };
+}
+
+function mcpServersOf(mcpConfig: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(mcpConfig) || !isRecord(mcpConfig.mcpServers)) {
+    return undefined;
+  }
+  return mcpConfig.mcpServers;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 async function syncOptionalSharedStateLink(
