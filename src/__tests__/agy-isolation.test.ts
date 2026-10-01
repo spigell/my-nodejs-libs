@@ -7,6 +7,7 @@ import test, { afterEach } from 'node:test';
 import {
   createAgyIsolation,
   DEFAULT_AGY_MODEL,
+  normalizeAgyMcpConfig,
 } from '../agents/agy-isolation.js';
 
 const originalHome = process.env.HOME;
@@ -169,4 +170,72 @@ void test('createAgyIsolation writes the default model when settings omit it', a
 
   assert.equal(settingsJson.model, DEFAULT_AGY_MODEL);
   assert.deepEqual(settingsJson.trustedWorkspaces, ['/spigell-reforge-ai']);
+});
+
+void test('normalizeAgyMcpConfig turns a millisecond timeout into timeoutSeconds', () => {
+  assert.deepEqual(
+    normalizeAgyMcpConfig({
+      mcpServers: {
+        pulumi: {
+          serverUrl: 'http://pulumi/mcp',
+          trust: true,
+          timeout: 1_200_000,
+        },
+        build: { serverUrl: 'http://build/mcp', timeout: 1500 },
+        kept: {
+          serverUrl: 'http://kept/mcp',
+          timeout: 60_000,
+          timeoutSeconds: 900,
+        },
+        bad: { serverUrl: 'http://bad/mcp', timeout: 'soon' },
+        plain: { serverUrl: 'http://plain/mcp' },
+      },
+    }),
+    {
+      mcpServers: {
+        pulumi: {
+          serverUrl: 'http://pulumi/mcp',
+          trust: true,
+          timeoutSeconds: 1200,
+        },
+        build: { serverUrl: 'http://build/mcp', timeoutSeconds: 2 },
+        kept: { serverUrl: 'http://kept/mcp', timeoutSeconds: 900 },
+        bad: { serverUrl: 'http://bad/mcp' },
+        plain: { serverUrl: 'http://plain/mcp' },
+      },
+    },
+  );
+});
+
+void test('normalizeAgyMcpConfig leaves non-server configs as given', () => {
+  assert.deepEqual(normalizeAgyMcpConfig({ mcpServers: {} }), {
+    mcpServers: {},
+  });
+  assert.equal(normalizeAgyMcpConfig(null), null);
+  assert.deepEqual(normalizeAgyMcpConfig({ other: 1 }), { other: 1 });
+});
+
+void test('createAgyIsolation writes timeoutSeconds to mcp_config.json', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agy-isolation-'));
+  tempDirs.push(tempRoot);
+  process.env.HOME = path.join(tempRoot, 'home');
+  process.env.AGENT_NAME = 'agy';
+
+  const isolation = await createAgyIsolation({
+    toolName: 'timeouts',
+    mcpConfig: {
+      mcpServers: {
+        pulumi: { serverUrl: 'http://pulumi/mcp', timeout: 1_800_000 },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(isolation.mcpConfigPath, 'utf8')),
+    {
+      mcpServers: {
+        pulumi: { serverUrl: 'http://pulumi/mcp', timeoutSeconds: 1800 },
+      },
+    },
+  );
 });

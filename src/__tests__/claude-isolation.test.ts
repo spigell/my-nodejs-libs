@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { afterEach } from 'node:test';
 
-import { createClaudeIsolation } from '../agents/claude-isolation.js';
+import {
+  createClaudeIsolation,
+  normalizeClaudeMcpConfig,
+} from '../agents/claude-isolation.js';
 
 const originalHome = process.env.HOME;
 const originalIsolatedHomeRoot = process.env.CLAUDE_ISOLATED_HOME_ROOT;
@@ -284,4 +287,50 @@ void test('createClaudeIsolation requires shared Claude credentials', async () =
     }),
     /Missing required Claude shared credentials/,
   );
+});
+
+void test('normalizeClaudeMcpConfig gives every server a per-server timeout', () => {
+  assert.deepEqual(
+    normalizeClaudeMcpConfig(
+      {
+        mcpServers: {
+          own: { type: 'http', url: 'http://own/mcp', timeout: 600_000 },
+          seconds: {
+            type: 'http',
+            url: 'http://seconds/mcp',
+            timeoutSeconds: 1200,
+          },
+          fallback: { type: 'http', url: 'http://fallback/mcp' },
+        },
+      },
+      { MCP_TOOL_TIMEOUT: '1800000' },
+    ),
+    {
+      mcpServers: {
+        own: { type: 'http', url: 'http://own/mcp', timeout: 600_000 },
+        seconds: {
+          type: 'http',
+          url: 'http://seconds/mcp',
+          timeout: 1_200_000,
+        },
+        fallback: {
+          type: 'http',
+          url: 'http://fallback/mcp',
+          timeout: 1_800_000,
+        },
+      },
+    },
+  );
+});
+
+void test('normalizeClaudeMcpConfig without a timeout source leaves servers alone', () => {
+  const config = {
+    mcpServers: { plain: { type: 'http', url: 'http://plain/mcp' } },
+  };
+  assert.deepEqual(normalizeClaudeMcpConfig(config), config);
+  assert.deepEqual(
+    normalizeClaudeMcpConfig(config, { MCP_TOOL_TIMEOUT: 'never' }),
+    config,
+  );
+  assert.equal(normalizeClaudeMcpConfig(undefined), undefined);
 });

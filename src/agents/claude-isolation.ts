@@ -69,7 +69,13 @@ export async function createClaudeIsolation(args: {
       await fs.rm(promptPath, { force: true });
     }
     await writeJson(settingsPath, args.settings ?? {});
-    await writeJson(mcpConfigPath, args.mcpConfig ?? { mcpServers: {} });
+    await writeJson(
+      mcpConfigPath,
+      normalizeClaudeMcpConfig(
+        args.mcpConfig ?? { mcpServers: {} },
+        args.extraEnv,
+      ),
+    );
     await linkSharedCredentials(
       path.join(
         args.sharedClaudeHome ?? resolveSharedClaudeHome(),
@@ -102,6 +108,51 @@ export async function createClaudeIsolation(args: {
       ? () => Promise.resolve()
       : () => fs.rm(isolatedHome, { recursive: true, force: true }),
   };
+}
+
+/**
+ * Claude Code waits for an MCP server's first response for the larger of 60
+ * seconds and that server's `timeout` (milliseconds); `MCP_TOOL_TIMEOUT` only
+ * caps a call's total time and does not raise that wait. So a server with no
+ * `timeout` gets one: from its `timeoutSeconds` (the agy-style key, which is
+ * then dropped), else from `MCP_TOOL_TIMEOUT` in `extraEnv`. A server that
+ * already has `timeout` is left alone, and anything that is not an
+ * `mcpServers` object is written as given.
+ */
+export function normalizeClaudeMcpConfig(
+  mcpConfig: unknown,
+  extraEnv?: NodeJS.ProcessEnv,
+): unknown {
+  if (!isRecord(mcpConfig) || !isRecord(mcpConfig.mcpServers)) {
+    return mcpConfig;
+  }
+  const toolTimeoutMs = Number(extraEnv?.MCP_TOOL_TIMEOUT);
+  return {
+    ...mcpConfig,
+    mcpServers: Object.fromEntries(
+      Object.entries(mcpConfig.mcpServers).map(([name, server]) => {
+        if (!isRecord(server) || server.timeout !== undefined) {
+          return [name, server];
+        }
+        const { timeoutSeconds, ...rest } = server;
+        if (isPositiveNumber(timeoutSeconds)) {
+          return [name, { ...rest, timeout: Math.ceil(timeoutSeconds * 1000) }];
+        }
+        if (isPositiveNumber(toolTimeoutMs)) {
+          return [name, { ...server, timeout: toolTimeoutMs }];
+        }
+        return [name, server];
+      }),
+    ),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 async function syncClaudeAgents(
