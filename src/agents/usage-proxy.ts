@@ -237,6 +237,87 @@ export class UsagePoller {
   }
 }
 
+/**
+ * One rate-limit window of a usage answer, normalised across providers so a
+ * dashboard can chart them together. `window` is `five_hour` or `seven_day`
+ * where the provider's window maps onto one, else the provider's own name;
+ * `scope` is `all` for an account-wide window, the model family for Claude's
+ * per-model weeks, and the quota group for agy.
+ */
+export type AgentUsageSample = {
+  window: string;
+  scope: string;
+  usedPercent: number;
+  resetsAt: number | undefined;
+};
+
+const WINDOW_NAMES: Record<string, string> = {
+  '18000': 'five_hour',
+  '604800': 'seven_day',
+  '5h': 'five_hour',
+  weekly: 'seven_day',
+};
+
+const parseTimestamp = (value: string | null): number | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms / 1000 : undefined;
+};
+
+export function usageSamples(
+  usage: AgentUsagePayload,
+  now: () => number = Date.now,
+): AgentUsageSample[] {
+  switch (usage.agent) {
+    case 'claude': {
+      const windows = [
+        ['five_hour', 'all', usage.five_hour],
+        ['seven_day', 'all', usage.seven_day],
+        ['seven_day', 'opus', usage.seven_day_opus],
+        ['seven_day', 'sonnet', usage.seven_day_sonnet],
+      ] as const;
+      return windows.flatMap(([window, scope, value]) =>
+        value
+          ? [
+              {
+                window,
+                scope,
+                usedPercent: value.utilization,
+                resetsAt: parseTimestamp(value.resets_at),
+              },
+            ]
+          : [],
+      );
+    }
+    case 'codex': {
+      const { primary_window: primary, secondary_window: secondary } =
+        usage.rate_limit;
+      return (
+        [
+          ['primary', primary],
+          ['secondary', secondary],
+        ] as const
+      ).map(([fallback, window]) => ({
+        window: WINDOW_NAMES[String(window.limit_window_seconds)] ?? fallback,
+        scope: 'all',
+        usedPercent: window.used_percent,
+        resetsAt: now() / 1000 + window.reset_after_seconds,
+      }));
+    }
+    case 'agy':
+      return usage.groups.flatMap((group) =>
+        group.buckets.map((bucket) => ({
+          window: WINDOW_NAMES[bucket.window] ?? bucket.window,
+          scope: group.name,
+          usedPercent: (1 - bucket.remaining_fraction) * 100,
+          resetsAt: parseTimestamp(bucket.reset_time),
+        })),
+      );
+  }
+}
+
 export type AgentUsageProxyOptions = {
   agent: AgentUsageKind;
   logging: Logging;
@@ -264,10 +345,6 @@ export function createAgentUsageProxy(
   options: AgentUsageProxyOptions,
 ): AgentUsageProxy {
   const { agent, logging } = options;
-  const loader = new CachedUsageLoader(
-    options.loader ?? defaultAgentUsageLoader(agent),
-    options.cacheTtlMs ?? AGENT_USAGE_DEFAULT_CACHE_TTL_MS[agent],
-  );
   const pollIntervalMs =
     options.pollIntervalMs ?? AGENT_USAGE_DEFAULT_POLL_INTERVAL_MS[agent];
   if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
@@ -284,6 +361,18 @@ export function createAgentUsageProxy(
       }),
   };
   const server = new Server(app);
+  const recordUsage = createUsageRecorder(server, agent);
+  const loadUsage = options.loader ?? defaultAgentUsageLoader(agent);
+  // Every upstream answer, from the poll or a cache miss, updates the usage
+  // gauges, so a scrape always sees the last values the proxy fetched.
+  const loader = new CachedUsageLoader(
+    () =>
+      loadUsage().then((usage) => {
+        recordUsage(usage);
+        return usage;
+      }),
+    options.cacheTtlMs ?? AGENT_USAGE_DEFAULT_CACHE_TTL_MS[agent],
+  );
   server.addRoute(
     'get',
     AGENT_USAGE_ROUTE,
@@ -335,6 +424,50 @@ export function createAgentUsageProxy(
       poller?.stop();
       return server.stop();
     },
+  };
+}
+
+/**
+ * A window the provider stops reporting (Claude drops a model's week when the
+ * plan has none) is removed, so its last value does not linger as current.
+ */
+function createUsageRecorder(
+  server: Server,
+  agent: AgentUsageKind,
+): (usage: AgentUsagePayload) => void {
+  const prom = server.getPrometheusClient();
+  const labelNames = ['agent', 'window', 'scope'] as const;
+  const usedPercent = prom.createGauge({
+    name: 'agent_usage_used_percent',
+    help: 'Percent of the rate-limit window already spent, from the last usage fetch',
+    labelNames,
+  });
+  const resetsAt = prom.createGauge({
+    name: 'agent_usage_resets_at_timestamp_seconds',
+    help: 'Unix time at which the rate-limit window resets',
+    labelNames,
+  });
+  let previous = new Map<string, { agent: string; window: string; scope: string }>();
+
+  return (usage) => {
+    const current = new Map<string, { agent: string; window: string; scope: string }>();
+    for (const sample of usageSamples(usage)) {
+      const labels = { agent, window: sample.window, scope: sample.scope };
+      current.set(`${sample.window}\u0000${sample.scope}`, labels);
+      usedPercent.set(sample.usedPercent, labels);
+      if (sample.resetsAt === undefined) {
+        resetsAt.remove(labels);
+      } else {
+        resetsAt.set(sample.resetsAt, labels);
+      }
+    }
+    for (const [key, labels] of previous) {
+      if (!current.has(key)) {
+        usedPercent.remove(labels);
+        resetsAt.remove(labels);
+      }
+    }
+    previous = current;
   };
 }
 
