@@ -10,6 +10,7 @@ import {
   createAgentUsageProxy,
   createUsageHandler,
   isAgentUsageKind,
+  usageSamples,
   type AgentUsagePayload,
   type UsagePollState,
 } from '../agents/usage-proxy.js';
@@ -383,6 +384,116 @@ void test('createAgentUsageProxy keeps /healthz ready while polls fail', async (
       ready: true,
       error: 'reauth required: refresh token reused',
     });
+  } finally {
+    await proxy.stop();
+  }
+});
+
+const claudeUsage = (opus: boolean): AgentUsagePayload => ({
+  agent: 'claude',
+  five_hour: { utilization: 12, resets_at: '2026-10-02T11:20:00+00:00' },
+  seven_day: { utilization: 35, resets_at: null },
+  seven_day_sonnet: null,
+  seven_day_opus: opus
+    ? { utilization: 50, resets_at: '2026-10-06T04:00:00+00:00' }
+    : null,
+  limits: [],
+  extra_usage: null,
+});
+
+void test('usageSamples normalises every provider onto window and scope', () => {
+  assert.deepEqual(usageSamples(claudeUsage(true)), [
+    { window: 'five_hour', scope: 'all', usedPercent: 12, resetsAt: Date.parse('2026-10-02T11:20:00Z') / 1000 },
+    { window: 'seven_day', scope: 'all', usedPercent: 35, resetsAt: undefined },
+    { window: 'seven_day', scope: 'opus', usedPercent: 50, resetsAt: Date.parse('2026-10-06T04:00:00Z') / 1000 },
+  ]);
+
+  const codexWindow = (used: number, seconds: number, reset: number) => ({
+    used_percent: used,
+    limit_window_seconds: seconds,
+    reset_after_seconds: reset,
+    limit_reached: false,
+  });
+  assert.deepEqual(
+    usageSamples(
+      {
+        agent: 'codex',
+        plan_type: 'plus',
+        rate_limit: {
+          allowed: true,
+          limit_reached: false,
+          primary_window: codexWindow(13, 18_000, 600),
+          secondary_window: codexWindow(27, 604_800, 86_400),
+        },
+      },
+      () => 1_000_000,
+    ),
+    [
+      { window: 'five_hour', scope: 'all', usedPercent: 13, resetsAt: 1_600 },
+      { window: 'seven_day', scope: 'all', usedPercent: 27, resetsAt: 87_400 },
+    ],
+  );
+
+  const [sample] = usageSamples({
+    agent: 'agy',
+    groups: [
+      {
+        name: 'Gemini Models',
+        models: [],
+        buckets: [
+          {
+            id: 'gemini-5h',
+            name: 'Five Hour Limit Remaining',
+            window: '5h',
+            remaining_fraction: 0.75,
+            reset_time: '2026-10-02T10:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(sample, {
+    window: 'five_hour',
+    scope: 'Gemini Models',
+    usedPercent: 25,
+    resetsAt: Date.parse('2026-10-02T10:00:00Z') / 1000,
+  });
+});
+
+void test('createAgentUsageProxy exports usage gauges and drops windows that disappear', async () => {
+  let opus = true;
+  const proxy = createAgentUsageProxy({
+    agent: 'claude',
+    logging: silentLogging(),
+    loader: () => Promise.resolve(claudeUsage(opus)),
+    pollIntervalMs: 0,
+    cacheTtlMs: 0,
+  });
+  proxy.start(0);
+  try {
+    const address = (
+      proxy.server as unknown as {
+        httpServer: import('node:http').Server;
+      }
+    ).httpServer.address();
+    assert.ok(address && typeof address === 'object');
+    const base = `http://127.0.0.1:${address.port}`;
+    const metrics = async () => {
+      assert.equal((await fetch(`${base}/usage`)).status, 200);
+      return (await fetch(`${base}/metrics`)).text();
+    };
+
+    const first = await metrics();
+    assert.match(first, /agent_usage_used_percent\{agent="claude",scope="all",window="five_hour"\} 12/);
+    assert.match(first, /agent_usage_used_percent\{agent="claude",scope="opus",window="seven_day"\} 50/);
+    assert.match(first, /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="five_hour"\} 1790\d+/);
+    assert.doesNotMatch(first, /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="seven_day"\}/);
+
+    opus = false;
+    const second = await metrics();
+    assert.doesNotMatch(second, /scope="opus"/);
+    assert.match(second, /agent_usage_used_percent\{agent="claude",scope="all",window="seven_day"\} 35/);
   } finally {
     await proxy.stop();
   }

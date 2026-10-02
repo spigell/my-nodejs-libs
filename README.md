@@ -337,6 +337,22 @@ instead:
 | `agent_usage_proxy_poll_last_success_timestamp_seconds{agent}` | Unix time of the last success.     |
 | `agent_usage_proxy_reauth_required{agent}`                     | `1` when credentials need a login. |
 
+Every upstream answer, from the poll or a cache miss, also updates the usage
+itself, one series per rate-limit window:
+
+| Metric                                                               | Meaning                                  |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| `agent_usage_used_percent{agent,window,scope}`                       | Percent of the window spent, 0 to 100.   |
+| `agent_usage_resets_at_timestamp_seconds{agent,window,scope}`        | Unix time the window resets, when known. |
+
+`window` is `five_hour` or `seven_day` (Codex's 18000 s and 604800 s windows,
+agy's `5h` and `weekly` buckets), else the provider's own name. `scope` is
+`all` for an account-wide window, `opus` or `sonnet` for Claude's per-model
+weeks, and the quota group name for agy, whose `remaining_fraction` becomes
+`(1 - remaining_fraction) * 100`. A window the provider stops reporting is
+removed rather than left at its last value. The spend rate is
+`deriv(agent_usage_used_percent[30m])`; a reset shows as a drop.
+
 Concurrent requests on a cache miss share one upstream call, and failures are
 not cached. A configuration error exits with status 2. Claude and Codex rotate
 credentials on disk, so the credential home must be mounted writable.
