@@ -56,7 +56,6 @@
     "@types/cors": "^2.8.18",
     "@types/express": "^5.0.1",
     "@types/node": "^24.0.0",
-    "@types/node-telegram-bot-api": "^0.64.8",
     "@types/ws": "^8.5.14",
     "eslint": "^10.0.0",
     "globals": "^17.0.0",
