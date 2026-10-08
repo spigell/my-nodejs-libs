@@ -361,6 +361,26 @@ credentials on disk, so the credential home must be mounted writable.
 `createUsageHandler()` are exported for services that embed the proxy rather
 than run the bin.
 
+## Claude cache keeper
+
+The `claude-cache-keeper` bin keeps the prompt cache of idle Claude Code zmx
+sessions warm. It reads each session's cache state from its transcript and,
+when a session is idle and close to expiry, types a `[keepalive]` message into
+its zmx PTY so the bump reads the cache instead of letting it expire. It needs
+only Node and the `zmx` binary the sessions run under, with the Claude home and
+the zmx socket directory mounted; it never runs Claude Code.
+
+```bash
+claude-cache-keeper status                       # decision per session, never bumps
+claude-cache-keeper watch --min-context 100000 --max-idle 15
+```
+
+Settings come from the defaults, then `~/.claude/cache-keeper.json` (re-read on
+every watch pass), then the flags. Only sessions on the 1h cache TTL are bumped.
+The last bump before `--max-idle` ends with "This is the last bump.", and no
+further bump follows until the next real prompt. The session's instructions
+must tell it to answer a `[keepalive]` message with `ok` only.
+
 ## Development commands
 
 ```bash
