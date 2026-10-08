@@ -254,8 +254,15 @@ export class PromClient {
       options.seriesLimitBehavior ?? 'drop',
       'registry',
     );
+    // sdk-metrics 2.12 hands the exporter the meter scope and resource, which
+    // it would print as an otel_scope_name label on every series and a
+    // target_info metric. Keep the exposition the dashboards already query.
     this.exporter = new ManagedPrometheusExporter(
-      { preventServerStart: true },
+      {
+        preventServerStart: true,
+        withoutScopeInfo: true,
+        withoutTargetInfo: true,
+      },
       () => {},
     );
     this.provider = new MeterProvider({ readers: [this.exporter] });
