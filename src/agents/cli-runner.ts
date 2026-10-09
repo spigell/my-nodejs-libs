@@ -181,7 +181,7 @@ export class CliRunner {
     });
 
     const state: EngineState = {
-      finalResult: null as unknown,
+      finalResult: null,
       lastAssistantText: '',
       rawStdout: '',
       rawStderr: '',
@@ -362,6 +362,27 @@ export class CliRunner {
       throw new Error(
         formatRunnerError({
           detail: abortReason,
+          stdout: rawStdoutTail,
+          stderr: rawStderrTail,
+          exitCode,
+        }),
+      );
+    }
+
+    // agy can emit a SUCCESS result before a later streaming or quota error.
+    // Its process exit is authoritative even when the parsed result looks good.
+    if (this.args.adapter.name === 'agy' && exitCode !== 0) {
+      const diagnosticLine = [
+        ...state.rawStdout.split(/\r?\n/),
+        ...stderr.split(/\r?\n/),
+      ].find((line) => line.includes('AGY_ERROR'));
+      const agyError = diagnosticLine?.slice(
+        diagnosticLine.indexOf('AGY_ERROR'),
+        diagnosticLine.indexOf('AGY_ERROR') + 1024,
+      );
+      throw new Error(
+        formatRunnerError({
+          detail: `agy process failed${agyError ? `: ${agyError}` : ''}`,
           stdout: rawStdoutTail,
           stderr: rawStderrTail,
           exitCode,
