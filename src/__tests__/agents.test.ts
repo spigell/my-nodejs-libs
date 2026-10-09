@@ -496,6 +496,72 @@ void test('agyAdapter builds print args with timeout and conversation id', () =>
 // run's token usage can be read off the terminal `result` event. The parsing
 // contract is covered in agy-adapter.test.ts.
 
+const runAgyFixture = (lines: string[], exitCode: number, stderr = '') => {
+  const adapter: CliAdapter = {
+    ...agyAdapter,
+    buildCliArgs() {
+      const output = `${lines.join('\n')}\n`;
+      return [
+        '-e',
+        `process.stdout.write(${JSON.stringify(output)}); process.stderr.write(${JSON.stringify(stderr)}); process.exit(${exitCode});`,
+      ];
+    },
+  };
+  return new CliRunner({
+    command: process.execPath,
+    adapter,
+    cwd: process.cwd(),
+    logger: { info() {} },
+  }).run('fixture');
+};
+
+const agySuccess = JSON.stringify({
+  event: 'result',
+  result: { status: 'SUCCESS', response: 'partial answer' },
+});
+
+void test('agy exit 3 fails despite a parsed SUCCESS result', async () => {
+  await assert.rejects(
+    runAgyFixture([agySuccess], 3, 'stream failed'),
+    (error: Error) => {
+      assert.match(error.message, /exit 3/);
+      assert.match(error.message, /stream failed/);
+      return true;
+    },
+  );
+});
+
+void test('agy exit 3 preserves a bounded AGY_ERROR line', async () => {
+  const diagnostic = `AGY_ERROR: ${'x'.repeat(12_000)}`;
+  await assert.rejects(
+    runAgyFixture([agySuccess, diagnostic, 'z'.repeat(9_000)], 3),
+    (error: Error) => {
+      assert.match(error.message, /exit 3/);
+      assert.match(error.message, /AGY_ERROR:/);
+      assert.ok(error.message.length < 20_000);
+      return true;
+    },
+  );
+});
+
+void test('agy quota exit fails without a terminal result', async () => {
+  await assert.rejects(
+    runAgyFixture([], 4, `AGY_ERROR: Quota exhausted\n${'z'.repeat(9_000)}`),
+    (error: Error) => {
+      assert.match(error.message, /exit 4/);
+      assert.match(error.message, /Quota exhausted/);
+      assert.match(error.message, /\[stderr tail\]/);
+      assert.ok(error.message.length < 10_000);
+      return true;
+    },
+  );
+});
+
+void test('agy exit 0 returns the parsed success', async () => {
+  const result = await runAgyFixture([agySuccess], 0);
+  assert.equal(result.text, 'partial answer');
+});
+
 void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {
   const textAdapter: CliAdapter = {
     name: 'text-fixture',

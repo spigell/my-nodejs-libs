@@ -53,7 +53,7 @@ void test('createAgyIsolation writes prompt, config, env, and requested skills',
       path: String(pathArg),
     });
     return realSymlink(target, pathArg);
-  }) as typeof fs.symlink;
+  });
 
   const promptSourcePath = path.join(tempRoot, 'prompt.md');
   await fs.writeFile(promptSourcePath, '# Prompt\n', 'utf8');

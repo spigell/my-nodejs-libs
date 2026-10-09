@@ -140,7 +140,7 @@ void test('MetricRegistry validates definitions, labels, and values', async () =
     labelNames: ['kind'],
   });
   assert.throws(
-    () => gauge.set(1, { kind: 'safe', secret: 'do-not-print' } as never),
+    () => gauge.set(1, { kind: 'safe', secret: 'do-not-print' }),
     (error: unknown) => {
       assert.ok(error instanceof InvalidMetricLabelsError);
       assert.doesNotMatch(error.message, /do-not-print/);
