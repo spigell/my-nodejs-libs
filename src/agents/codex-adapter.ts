@@ -66,7 +66,9 @@ export const codexAdapter: CliAdapter = {
   buildCliArgs(args: CliBuildArgs) {
     // `--json` is the only way codex reports token usage, and it turns a run
     // into events that can be streamed while it is still going.
-    const cliArgs = ['exec', '--json'];
+    // `--skip-git-repo-check` allows codex to start in plain directories that
+    // are not git repositories, and is harmless when inside a git work tree.
+    const cliArgs = ['exec', '--json', '--skip-git-repo-check'];
 
     for (const directory of args.includeDirectories ?? []) {
       cliArgs.push('--add-dir', directory);
@@ -143,7 +145,8 @@ export const codexAdapter: CliAdapter = {
     if (!text) {
       return {
         ok: false,
-        error: 'Codex completed its turn without producing an assistant message',
+        error:
+          'Codex completed its turn without producing an assistant message',
       };
     }
 

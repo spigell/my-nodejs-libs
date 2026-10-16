@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { codexAdapter } from '../agents/codex-adapter.js';
 import type { EngineState } from '../agents/protocol.js';
@@ -48,8 +51,31 @@ void test('codexAdapter runs exec in json mode', () => {
   assert.equal(codexAdapter.outputMode, 'jsonl');
   assert.equal(args[0], 'exec');
   assert.ok(args.includes('--json'));
+  assert.ok(args.includes('--skip-git-repo-check'));
   // The prompt is a positional, because CliRunner never writes to stdin.
   assert.equal(args[args.length - 1], 'do the thing');
+});
+
+void test('codexAdapter passes --skip-git-repo-check when working in a plain directory', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-test-plain-'));
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(tempDir);
+    const args = codexAdapter.buildCliArgs({ prompt: 'plain directory run' });
+    assert.ok(args.includes('--skip-git-repo-check'));
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+void test('codexAdapter keeps --skip-git-repo-check harmless when inside a git work tree', () => {
+  // Current working directory is inside this repository's git work tree.
+  const args = codexAdapter.buildCliArgs({ prompt: 'git work tree run' });
+  assert.ok(args.includes('--skip-git-repo-check'));
+  assert.equal(args[0], 'exec');
+  assert.ok(args.includes('--json'));
+  assert.equal(args[args.length - 1], 'git work tree run');
 });
 
 void test('codexAdapter passes additional workspaces as --add-dir', () => {
@@ -112,7 +138,10 @@ void test('codexAdapter fails when the turn produced no assistant message', () =
 
   const outcome = codexAdapter.finalize(state);
   assert.equal(outcome.ok, false);
-  assert.match(!outcome.ok ? outcome.error : '', /without producing an assistant/i);
+  assert.match(
+    !outcome.ok ? outcome.error : '',
+    /without producing an assistant/i,
+  );
 });
 
 void test('codexAdapter fails when no terminal turn event arrived', () => {
