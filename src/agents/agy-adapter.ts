@@ -150,6 +150,7 @@ export function resolveAgyModelSelection(
 
 export const agyAdapter: CliAdapter = {
   name: 'agy',
+  exitPolicy: 'require-zero',
   outputMode: 'jsonl',
   buildCliArgs(args: CliBuildArgs) {
     const printTimeoutMs = args.printTimeoutMs ?? 10 * 60 * 1000;

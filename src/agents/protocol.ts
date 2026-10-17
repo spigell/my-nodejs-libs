@@ -93,6 +93,8 @@ export type CliBuildArgs = {
 export type CliAdapter = {
   name: string;
   outputMode?: 'jsonl' | 'text';
+  /** A nonzero process exit invalidates parsed success unless explicitly trusted. */
+  exitPolicy?: 'require-zero' | 'trust-result';
   buildCliArgs(args: CliBuildArgs): string[];
   consumeEvent(state: EngineState, event: unknown): void;
   finalize(state: EngineState): EngineOutcome;
