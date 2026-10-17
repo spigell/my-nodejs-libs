@@ -211,11 +211,15 @@ export function evaluateAgentUsage(
       const typed: ClaudeUsageLimit = item;
       if (!typed.is_active || typed.percent < 100) continue;
       const scoped = typed.scope?.model;
-      // A versioned id identifies the model more precisely than a broad
-      // display name. Legacy unversioned registry names still use that name.
-      const scopeNames = scoped?.id && /\d/.test(scoped.id) && /\d/.test(model ?? '')
-        ? [scoped.id] : [scoped?.id, scoped?.display_name];
-      const applies = !scoped || !model || scopeNames
+      // A dated id has the same model version as its canonical slug. Check
+      // that version before considering the display name, which may be broad.
+      const version = (value: string) => value.replace(/-\d{8}$/, '')
+        .match(/\d+(?:[.-]\d+)*/g)?.join('-').replaceAll('.', '-');
+      const scopeVersion = scoped?.id && /\d/.test(scoped.id) ? version(scoped.id) : null;
+      const modelVersion = model && /\d/.test(model) ? version(model) : null;
+      const versionMatches = !scopeVersion || !modelVersion || scopeVersion === modelVersion;
+      const scopeNames = [scoped?.id, scoped?.display_name];
+      const applies = !scoped || !model || (versionMatches && scopeNames
         .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
         .some((name) => {
           const candidate = name.trim().toLowerCase();
@@ -225,13 +229,12 @@ export function evaluateAgentUsage(
               const uLower = u.toLowerCase();
               // A versioned scope must match a versioned alias. Otherwise a
               // different version matches through a broad name like "Opus".
-              const version = (value: string) => value.match(/\d+(?:[.-]\d+)*/g)?.join('-').replaceAll('.', '-');
               if (/\d/.test(candidate) && version(candidate) !== version(uLower)) return false;
               return candidate === uLower || candidate.includes(uLower) || uLower.includes(candidate);
             });
           }
           return model.includes(candidate) || (!/\d/.test(candidate) && candidate.includes(model));
-        });
+        }));
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
   } else if (adapter === 'agy') {
