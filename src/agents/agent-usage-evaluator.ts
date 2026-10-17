@@ -35,6 +35,61 @@ const WEEK = 7 * DAY;
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const nullableString = (value: unknown): boolean => value === null || typeof value === 'string';
+const claudeWindow = (value: unknown): boolean => {
+  if (value === null) return true;
+  const window = object(value);
+  return !!window && finite(window.utilization) && nullableString(window.resets_at);
+};
+const claudeLimit = (value: unknown): boolean => {
+  const limit = object(value);
+  if (!limit || typeof limit.kind !== 'string' || !limit.kind || !finite(limit.percent) ||
+      typeof limit.is_active !== 'boolean' || !nullableString(limit.group) || !nullableString(limit.resets_at)) return false;
+  if (limit.scope === null) return true;
+  const scope = object(limit.scope);
+  if (!scope) return false;
+  if (scope.model === null) return true;
+  const model = object(scope.model);
+  return !!model && nullableString(model.id) && typeof model.display_name === 'string';
+};
+const claudePayload = (root: Record<string, unknown>): boolean => {
+  const extra = root.extra_usage === null ? null : object(root.extra_usage);
+  return ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'].every((key) => claudeWindow(root[key])) &&
+    Array.isArray(root.limits) && root.limits.every(claudeLimit) &&
+    (root.extra_usage === null || (!!extra && typeof extra.is_enabled === 'boolean' &&
+      ['monthly_limit', 'used_credits', 'utilization'].every((key) => extra[key] === null || finite(extra[key])) &&
+      nullableString(extra.currency)));
+};
+const agyBucket = (value: unknown): boolean => {
+  const bucket = object(value);
+  return !!bucket && typeof bucket.id === 'string' && !!bucket.id.trim() &&
+    typeof bucket.name === 'string' && typeof bucket.window === 'string' && !!bucket.window.trim() &&
+    typeof bucket.normalized_window === 'string' && finite(bucket.remaining_fraction) &&
+    bucket.remaining_fraction >= 0 && bucket.remaining_fraction <= 1 &&
+    typeof bucket.reset_time === 'string' && !!bucket.reset_time.trim() && typeof bucket.limit_reached === 'boolean';
+};
+const agyFamily = (value: unknown): boolean => {
+  if (value === null) return true;
+  const family = object(value);
+  return !!family && ['gemini', 'argon', 'claude', 'gpt'].includes(family.family as string) &&
+    typeof family.group_name === 'string' && Array.isArray(family.models) &&
+    family.models.every((model: unknown) => typeof model === 'string') &&
+    (family.five_hour === null || agyBucket(family.five_hour)) &&
+    (family.seven_day === null || agyBucket(family.seven_day));
+};
+const agyPayload = (root: Record<string, unknown>): boolean => {
+  const families = object(root.families);
+  return Array.isArray(root.groups) && root.groups.every((value: unknown) => {
+    const group = object(value);
+    return !!group && typeof group.name === 'string' && !!group.name.trim() &&
+      Array.isArray(group.families) && group.families.every((family: unknown) =>
+        ['gemini', 'argon', 'claude', 'gpt'].includes(family as string)) &&
+      Array.isArray(group.models) && group.models.every((model: unknown) => typeof model === 'string') &&
+      Array.isArray(group.buckets) && group.buckets.every(agyBucket) &&
+      (group.five_hour === null || agyBucket(group.five_hour)) &&
+      (group.seven_day === null || agyBucket(group.seven_day));
+  }) && !!families && ['gemini', 'argon', 'claude', 'gpt'].every((key) => agyFamily(families[key]));
+};
 const validDate = (value: unknown): string | null => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
 const isoAfter = (now: number, seconds: unknown): string | null => {
   if (!finite(seconds)) return null;
@@ -98,8 +153,10 @@ export function evaluateAgentUsage(
     const rate = object(root.rate_limit);
     const primary = object(rate?.primary_window);
     const secondary = object(rate?.secondary_window);
-    if (!rate || !primary || !secondary || typeof rate.allowed !== 'boolean' || typeof rate.limit_reached !== 'boolean' ||
+    if (typeof root.plan_type !== 'string' || !rate || !primary || !secondary ||
+        typeof rate.allowed !== 'boolean' || typeof rate.limit_reached !== 'boolean' ||
         !finite(primary.used_percent) || !finite(secondary.used_percent) ||
+        !finite(primary.limit_window_seconds) || !finite(secondary.limit_window_seconds) ||
         typeof primary.limit_reached !== 'boolean' || typeof secondary.limit_reached !== 'boolean' ||
         !finite(primary.reset_after_seconds) || !finite(secondary.reset_after_seconds)) return verdict;
     const usage = payload as CodexUsage;
@@ -115,7 +172,7 @@ export function evaluateAgentUsage(
     if (secondary.limit_reached) block('quota_limit', 'Secondary window limit reached');
     if (rate.limit_reached) block('quota_limit', 'Overall account limit reached');
   } else if (adapter === 'claude') {
-    if (!Array.isArray(root.limits)) return verdict;
+    if (!claudePayload(root)) return verdict;
     const usage = payload as ClaudeUsage;
     const model = defaultModel?.trim().toLowerCase();
     const family = model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null;
@@ -159,7 +216,8 @@ export function evaluateAgentUsage(
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
   } else if (adapter === 'agy') {
-    if (!Array.isArray(root.groups) || root.groups.length === 0) return close('missing_window', 'No Agy quota groups');
+    if (!agyPayload(root)) return verdict;
+    if ((root.groups as unknown[]).length === 0) return close('missing_window', 'No Agy quota groups');
     const usage = payload as AgyUsage;
     const groups = usage.groups;
     if (groups.some((group) => !object(group) || typeof group.name !== 'string' || !Array.isArray(group.buckets) ||

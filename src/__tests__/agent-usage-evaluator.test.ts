@@ -24,6 +24,13 @@ const agy = () => {
   const group = { name: 'Gemini Models', families: ['gemini'], models: ['Gemini Flash'], buckets: [five_hour, seven_day], five_hour, seven_day };
   return { agent: 'agy', groups: [group], families: { gemini: { family: 'gemini', group_name: group.name, models: group.models, five_hour, seven_day }, argon: null, claude: null, gpt: null } };
 };
+const without = (payload: unknown, ...path: string[]): unknown => {
+  const copy = structuredClone(payload) as Record<string, unknown>;
+  let parent = copy;
+  for (const key of path.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+  delete parent[path.at(-1)!];
+  return copy;
+};
 type Fixture = { name: string; adapter: 'codex' | 'claude' | 'agy'; payload: unknown; model?: string; taskRunModel?: string; policy?: AgentRunnerPolicy; reason: AgentUsageReasonCode };
 const fixtures: Fixture[] = [
   { name: 'Codex available', adapter: 'codex', payload: codex(), reason: 'available' },
@@ -48,9 +55,18 @@ const fixtures: Fixture[] = [
   { name: 'Agy unknown model', adapter: 'agy', payload: agy(), model: 'mystery', reason: 'family_unknown' },
   { name: 'Agy empty groups', adapter: 'agy', payload: { ...agy(), groups: [] }, reason: 'missing_window' },
   { name: 'Malformed Codex', adapter: 'codex', payload: { agent: 'codex', rate_limit: {} }, reason: 'usage_unavailable' },
+  { name: 'Codex missing plan type', adapter: 'codex', payload: without(codex(), 'plan_type'), reason: 'usage_unavailable' },
+  ...(['primary_window', 'secondary_window'] as const).map((window): Fixture => ({
+    name: `Codex ${window} missing window length`, adapter: 'codex',
+    payload: without(codex(), 'rate_limit', window, 'limit_window_seconds'), reason: 'usage_unavailable',
+  })),
   { name: 'Malformed Claude', adapter: 'claude', payload: { agent: 'claude', limits: 'bad' }, reason: 'usage_unavailable' },
+  { name: 'Claude selected window missing reset', adapter: 'claude', payload: without(claude(), 'five_hour', 'resets_at'), reason: 'usage_unavailable' },
+  { name: 'Claude unselected window missing reset', adapter: 'claude', payload: without(claude(), 'seven_day_opus', 'resets_at'), model: 'claude-sonnet-4', reason: 'usage_unavailable' },
+  { name: 'Claude missing extra usage', adapter: 'claude', payload: without(claude(), 'extra_usage'), reason: 'usage_unavailable' },
   { name: 'Malformed Agy', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: 'bad' }] }, reason: 'usage_unavailable' },
   { name: 'Malformed Agy bucket', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: [{ id: 3 }] }] }, reason: 'usage_unavailable' },
+  { name: 'Agy bucket missing reset', adapter: 'agy', payload: without(agy(), 'groups', '0', 'buckets', '0', 'reset_time'), reason: 'usage_unavailable' },
 ];
 for (const fixture of fixtures) void test(fixture.name, () => {
   const result = evaluateAgentUsage(fixture.adapter, fixture.payload, fixture.model, fixture.policy ?? policy, null, now);
