@@ -3,7 +3,12 @@ import type { RequestHandler } from 'express';
 import type { App } from '../app/app.js';
 import { Server } from '../http/server.js';
 import type { Logging } from '../logger/logger.js';
-import { getAgyUsage, resolveAgyFamilies, type AgyUsage } from './agy-usage.js';
+import {
+  agyFamilyGroups,
+  getAgyUsage,
+  resolveAgyFamilies,
+  type AgyUsage,
+} from './agy-usage.js';
 import { getClaudeUsage, type ClaudeUsage } from './claude-usage.js';
 import {
   CodexTokenRefreshError,
@@ -309,9 +314,9 @@ export function usageSamples(
       }));
     }
     case 'agy': {
-      const familyGroups = new Map<string, (typeof usage.groups)[number]>();
-      for (const group of usage.groups) {
-        const families =
+      const groups = usage.groups.map((group) => ({
+        ...group,
+        families:
           group.families && group.families.length > 0
             ? group.families
             : resolveAgyFamilies(
@@ -319,25 +324,13 @@ export function usageSamples(
                 undefined,
                 group.buckets,
                 group.models,
-              );
-        for (const family of families) {
-          if (!familyGroups.has(family)) {
-            familyGroups.set(family, group);
-          }
-        }
-      }
+              ),
+      }));
+      const familyGroups = agyFamilyGroups(groups);
 
       const seen = new Set<string>();
-      return usage.groups.flatMap((group) => {
-        const families =
-          group.families && group.families.length > 0
-            ? group.families
-            : resolveAgyFamilies(
-                group.name,
-                undefined,
-                group.buckets,
-                group.models,
-              );
+      return groups.flatMap((group) => {
+        const families = group.families;
         const scopes =
           families.length > 0
             ? families.filter((family) => familyGroups.get(family) === group)

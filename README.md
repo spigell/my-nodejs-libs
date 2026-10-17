@@ -348,9 +348,15 @@ itself, one series per rate-limit window:
 `window` is `five_hour` or `seven_day` (Codex's 18000 s and 604800 s windows,
 agy's `5h` and `weekly` buckets), else the provider's own name. `scope` is
 `all` for an account-wide window, `opus` or `sonnet` for Claude's per-model
-weeks, and the quota group name for agy, whose `remaining_fraction` becomes
-`(1 - remaining_fraction) * 100`. A window the provider stops reporting is
-removed rather than left at its last value. The spend rate is
+weeks, and the model family (`gemini`, `argon`, `claude`, or `gpt`) for agy.
+Dashboards and alerts filtering on agy group names such as `Gemini Models` or
+`Claude and GPT models` must switch to these family scopes.
+Unrecognized agy groups use their group name as `scope`. Agy's
+`remaining_fraction` becomes `(1 - remaining_fraction) * 100`. Its `claude`
+and `gpt` series report the same shared quota; summing them across `scope`
+double-counts usage. Argon has no `five_hour` series in the observed agy
+response: that window is missing, not 0% or 100% used. A window the provider
+stops reporting is removed rather than left at its last value. The spend rate is
 `deriv(agent_usage_used_percent[30m])`; a reset shows as a drop.
 
 Concurrent requests on a cache miss share one upstream call, and failures are

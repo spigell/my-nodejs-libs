@@ -695,7 +695,7 @@ void test('usageSamples assigns gemini scope when resolving families without cro
   assert.equal(Math.round(samples[0]?.usedPercent ?? 0), 15);
 });
 
-void test('usageSamples consistently keeps the first group matching a family across multiple groups', () => {
+void test('usageSamples prefers the dedicated family group over an earlier shared group', () => {
   const agyPayload: AgentUsagePayload = {
     agent: 'agy',
     families: emptyAgyFamilies,
@@ -743,8 +743,7 @@ void test('usageSamples consistently keeps the first group matching a family acr
   const argonSamples = samples.filter((s) => s.scope === 'argon');
   assert.equal(argonSamples.length, 1);
   assert.equal(argonSamples[0]?.window, 'seven_day');
-  // First group's remaining_fraction is 0.9 -> 10% used, not second group's 50%
-  assert.equal(Math.round(argonSamples[0]?.usedPercent ?? 0), 10);
+  assert.equal(Math.round(argonSamples[0]?.usedPercent ?? 0), 50);
 });
 
 void test('createAgentUsageProxy exports usage gauges and drops windows that disappear', async () => {

@@ -365,6 +365,38 @@ void test('parseAgyUsage correctly resolves families when descriptions contain e
   assert.equal(usage.families.argon?.seven_day?.id, 'gemini-argon-wtu-weekly');
 });
 
+void test('parseAgyUsage selects the dedicated Argon group when an earlier group also lists Argon', () => {
+  const payload = JSON.stringify({
+    event: 'command_result',
+    command: {
+      data: {
+        groups: [
+          {
+            name: 'Gemini Models',
+            description: 'Models within this group: Gemini Flash, Gemini 4 Argon',
+            buckets: [{
+              id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.9,
+              reset_time: '2026-10-24T00:00:00Z',
+            }],
+          },
+          {
+            name: 'Gemini 4 Argon',
+            buckets: [{
+              id: 'gemini-argon-wtu-weekly', window: 'weekly', remaining_fraction: 0.5,
+              reset_time: '2026-10-24T12:00:00Z',
+            }],
+          },
+        ],
+      },
+    },
+  });
+  const usage = parseAgyUsage(payload);
+  assert.equal(usage.families.argon?.group_name, 'Gemini 4 Argon');
+  assert.equal(usage.families.argon?.seven_day?.remaining_fraction, 0.5);
+  assert.equal(usage.families.argon?.five_hour, null);
+  assert.equal(usage.families.gemini?.group_name, 'Gemini Models');
+});
+
 void test('parseAgyUsage leaves missing windows explicit and handles partial groups', () => {
   const partialPayload = JSON.stringify({
     event: 'command_result',

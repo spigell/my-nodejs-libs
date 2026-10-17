@@ -403,6 +403,28 @@ export function resolveAgyFamilies(
   return families;
 }
 
+/** Prefer a quota group that names the family itself over a group that merely lists its models. */
+export function agyFamilyGroups(
+  groups: readonly AgyUsageGroup[],
+): Map<AgyModelFamily, AgyUsageGroup> {
+  const owners = new Map<AgyModelFamily, AgyUsageGroup>();
+  const scores = new Map<AgyModelFamily, number>();
+  for (const group of groups) {
+    for (const family of group.families) {
+      const nameMatches = group.name.toLowerCase().includes(family);
+      const bucketMatches = group.buckets.some((bucket) =>
+        bucket.id.toLowerCase().includes(family),
+      );
+      const score = nameMatches ? 2 : bucketMatches ? 1 : 0;
+      if (!owners.has(family) || score > (scores.get(family) ?? -1)) {
+        owners.set(family, group);
+        scores.set(family, score);
+      }
+    }
+  }
+  return owners;
+}
+
 function buildFamilyMap(
   groups: readonly AgyUsageGroup[],
 ): Record<AgyModelFamily, AgyFamilyUsage | null> {
@@ -413,18 +435,14 @@ function buildFamilyMap(
     gpt: null,
   };
 
-  for (const group of groups) {
-    for (const family of group.families) {
-      if (!result[family]) {
-        result[family] = {
-          family,
-          group_name: group.name,
-          models: group.models,
-          five_hour: group.five_hour,
-          seven_day: group.seven_day,
-        };
-      }
-    }
+  for (const [family, group] of agyFamilyGroups(groups)) {
+    result[family] = {
+      family,
+      group_name: group.name,
+      models: group.models,
+      five_hour: group.five_hour,
+      seven_day: group.seven_day,
+    };
   }
 
   return result;
