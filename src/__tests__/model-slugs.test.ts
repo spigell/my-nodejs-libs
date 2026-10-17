@@ -271,6 +271,9 @@ const CLAUDE_SLUGS: readonly ClaudeSlugSpec[] = [
       { id: null, display_name: 'Opus' },
     ],
     nonMatchingScopes: [
+      { id: null, display_name: 'Claude Opus 4.5' },
+      { id: null, display_name: 'Claude Opus 5' },
+      { id: 'claude-opus-4-5', display_name: 'Claude Opus' },
       { id: null, display_name: 'Claude Sonnet 5.5' },
       { id: null, display_name: 'Claude Haiku 4.5' },
       { id: null, display_name: 'Fable' },
@@ -287,6 +290,9 @@ const CLAUDE_SLUGS: readonly ClaudeSlugSpec[] = [
       { id: null, display_name: 'Sonnet' },
     ],
     nonMatchingScopes: [
+      { id: null, display_name: 'Claude Sonnet 4.5' },
+      { id: null, display_name: 'Claude Sonnet 5' },
+      { id: 'claude-sonnet-4-5', display_name: 'Claude Sonnet' },
       { id: null, display_name: 'Claude Opus 5.5' },
       { id: null, display_name: 'Claude Haiku 4.5' },
       { id: null, display_name: 'Fable' },
@@ -544,6 +550,22 @@ for (const spec of CLAUDE_SLUGS) {
   });
 }
 
+void test('broad Claude display names observe their family weekly windows', () => {
+  for (const [name, slug, family] of [
+    ['Claude Opus', 'claude-opus-5-5', 'opus'],
+    ['Claude Sonnet', 'claude-sonnet-5-5', 'sonnet'],
+  ] as const) {
+    const payload = claudeBase();
+    if (family === 'opus') payload.seven_day_opus.utilization = 100;
+    else payload.seven_day_sonnet.utilization = 100;
+    const byName = evaluateAgentUsage('claude', payload, name, policy, null, now);
+    const bySlug = evaluateAgentUsage('claude', payload, slug, policy, null, now);
+    assert.equal(byName.quotaFamily, family);
+    assert.equal(byName.reasonCode, 'quota_limit');
+    assert.equal(byName.reasonCode, bySlug.reasonCode);
+  }
+});
+
 // --- 4. Codex slugs: present in map and evaluateAgentUsage works identically ---
 for (const slug of CODEX_SLUGS) {
   void test(`MODEL_SLUG_MAP defines Codex slug ${slug}`, () => {
@@ -554,18 +576,19 @@ for (const slug of CODEX_SLUGS) {
 
     const base = codexBase();
     const resSlug = evaluateAgentUsage('codex', base, slug, policy, null, now);
-    const resUndefined = evaluateAgentUsage(
+    const resName = evaluateAgentUsage(
       'codex',
       base,
-      undefined,
+      entry.displayNames[0],
       policy,
       null,
       now,
     );
     assert.equal(resSlug.available, true);
     assert.equal(resSlug.reasonCode, 'available');
-    assert.equal(resSlug.available, resUndefined.available);
-    assert.equal(resSlug.reasonCode, resUndefined.reasonCode);
+    assert.equal(resSlug.available, resName.available);
+    assert.equal(resSlug.reasonCode, resName.reasonCode);
+    assert.equal(resSlug.quotaFamily, resName.quotaFamily);
   });
 }
 

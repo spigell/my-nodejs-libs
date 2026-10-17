@@ -177,7 +177,9 @@ export function evaluateAgentUsage(
     const usage = payload as ClaudeUsage;
     const model = defaultModel?.trim().toLowerCase();
     const slugEntry = model ? getModelSlugEntry(model) : undefined;
-    const family = (slugEntry && slugEntry.family !== undefined ? slugEntry.family : null) ?? (model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null);
+    // Agy display names also occur in the slug map with the broader `claude`
+    // family. Claude's own windows use the Opus/Sonnet family instead.
+    const family = model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null;
     verdict.quotaFamily = family;
     const selected: Array<[string, ClaudeUsageWindow | null]> = [
       ['5h', usage.five_hour], ['7d', usage.seven_day],
@@ -209,18 +211,25 @@ export function evaluateAgentUsage(
       const typed: ClaudeUsageLimit = item;
       if (!typed.is_active || typed.percent < 100) continue;
       const scoped = typed.scope?.model;
-      const applies = !scoped || !model || [scoped.id, scoped.display_name]
+      // A recognized model id is more precise than a broad display name.
+      const scopeNames = scoped?.id && getModelSlugEntry(scoped.id)?.slug === scoped.id
+        ? [scoped.id] : [scoped?.id, scoped?.display_name];
+      const applies = !scoped || !model || scopeNames
         .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
         .some((name) => {
           const candidate = name.trim().toLowerCase();
-          if (candidate === model || model.includes(candidate) || candidate.includes(model)) return true;
+          if (candidate === model) return true;
           if (slugEntry) {
             return slugEntry.usageNames.some((u) => {
               const uLower = u.toLowerCase();
+              // A versioned scope must match a versioned alias. Otherwise a
+              // different version matches through a broad name like "Opus".
+              const version = (value: string) => value.match(/\d+(?:[.-]\d+)*/g)?.join('-').replaceAll('.', '-');
+              if (/\d/.test(candidate) && version(candidate) !== version(uLower)) return false;
               return candidate === uLower || candidate.includes(uLower) || uLower.includes(candidate);
             });
           }
-          return false;
+          return model.includes(candidate) || (!/\d/.test(candidate) && candidate.includes(model));
         });
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
