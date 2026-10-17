@@ -6,6 +6,7 @@ import {
   agyAdapter,
   claudeAdapter,
   CliRunner,
+  codexAdapter,
   createJsonlParser,
   geminiAdapter,
   type CliAdapter,
@@ -560,6 +561,76 @@ void test('agy quota exit fails without a terminal result', async () => {
 void test('agy exit 0 returns the parsed success', async () => {
   const result = await runAgyFixture([agySuccess], 0);
   assert.equal(result.text, 'partial answer');
+});
+
+const codexSuccess = [
+  { type: 'item.completed', item: { type: 'agent_message', text: 'done' } },
+  { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+];
+const claudeSuccess = [{ type: 'result', result: 'done', is_error: false }];
+
+for (const [label, adapter, events] of [
+  ['Codex', codexAdapter, codexSuccess],
+  ['Claude', claudeAdapter, claudeSuccess],
+] as const) {
+  void test(`${label} accepts parsed success with exit zero`, async () => {
+    const output = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+    const fixture: CliAdapter = {
+      ...adapter,
+      buildCliArgs() {
+        return ['-e', `process.stdout.write(${JSON.stringify(output)})`];
+      },
+    };
+    const runner = new CliRunner({
+      command: process.execPath,
+      adapter: fixture,
+      cwd: process.cwd(),
+      logger: { info() {} },
+    });
+    assert.equal((await runner.run('fixture')).text, 'done');
+  });
+
+  void test(`${label} rejects a nonzero exit after parsed success`, async () => {
+    const output = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+    const fixture: CliAdapter = {
+      ...adapter,
+      buildCliArgs() {
+        return [
+          '-e',
+          `process.stdout.write(${JSON.stringify(output)}); process.stderr.write('late failure'); process.exit(1);`,
+        ];
+      },
+    };
+    const runner = new CliRunner({
+      command: process.execPath,
+      adapter: fixture,
+      cwd: process.cwd(),
+      logger: { info() {} },
+    });
+    await assert.rejects(runner.run('fixture'), (error: Error) => {
+      assert.match(error.message, /exit 1/);
+      assert.match(error.message, /\[stdout tail\]/);
+      assert.match(error.message, /\[stderr tail\][\s\S]*late failure/);
+      return true;
+    });
+  });
+}
+
+void test('a renamed agy wrapper retains its declared exit policy', async () => {
+  const adapter: CliAdapter = { ...agyAdapter, name: 'agy-wrapper' };
+  assert.equal(adapter.exitPolicy, 'require-zero');
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter: {
+      ...adapter,
+      buildCliArgs() {
+        return ['-e', `process.stdout.write(${JSON.stringify(`${agySuccess}\n`)}); process.exit(3);`];
+      },
+    },
+    cwd: process.cwd(),
+    logger: { info() {} },
+  });
+  await assert.rejects(runner.run('fixture'), /agy-wrapper process failed \(exit 3\)/);
 });
 
 void test('CliRunner supports text-mode adapters without JSONL parsing', async () => {

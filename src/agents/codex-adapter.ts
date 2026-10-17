@@ -62,6 +62,9 @@ function normalizeUsage(usage: unknown): TokenUsage | null {
 
 export const codexAdapter: CliAdapter = {
   name: 'codex',
+  // UNSAFE: codex 0.162.1 can emit turn.completed then exit 1 when an earlier
+  // unretried server error set error_seen (codex-rs/exec/src/lib.rs:1298-1404).
+  exitPolicy: 'require-zero',
   outputMode: 'jsonl',
   buildCliArgs(args: CliBuildArgs) {
     // `--json` is the only way codex reports token usage, and it turns a run

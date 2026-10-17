@@ -343,6 +343,7 @@ export class CliRunner {
           detail: stderr || `${this.args.command} timed out`,
           stdout: rawStdoutTail,
           stderr: rawStderrTail,
+          exitCode,
         }),
       );
     }
@@ -369,20 +370,20 @@ export class CliRunner {
       );
     }
 
-    // agy can emit a SUCCESS result before a later streaming or quota error.
-    // Its process exit is authoritative even when the parsed result looks good.
-    if (this.args.adapter.name === 'agy' && exitCode !== 0) {
+    // A terminal event is not proof that the CLI exited successfully. An
+    // undeclared policy also fails closed for third-party adapters.
+    if (this.args.adapter.exitPolicy !== 'trust-result' && exitCode !== 0) {
       const diagnosticLine = [
         ...state.rawStdout.split(/\r?\n/),
         ...stderr.split(/\r?\n/),
       ].find((line) => line.includes('AGY_ERROR'));
-      const agyError = diagnosticLine?.slice(
+      const diagnostic = diagnosticLine?.slice(
         diagnosticLine.indexOf('AGY_ERROR'),
         diagnosticLine.indexOf('AGY_ERROR') + 1024,
       );
       throw new Error(
         formatRunnerError({
-          detail: `agy process failed${agyError ? `: ${agyError}` : ''}`,
+          detail: `${this.args.adapter.name} process failed${diagnostic ? `: ${diagnostic}` : ''}`,
           stdout: rawStdoutTail,
           stderr: rawStderrTail,
           exitCode,

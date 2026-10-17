@@ -233,6 +233,9 @@ function normalizeError(result: Record<string, unknown>): string {
 
 export const claudeAdapter: CliAdapter = {
   name: 'claude',
+  // UNSAFE: Claude Code 2.1.296 documents headless hooks and MCP shutdown,
+  // but no benign nonzero exit code after a result; fail closed on all codes.
+  exitPolicy: 'require-zero',
   buildCliArgs(args: CliBuildArgs) {
     if (args.dangerouslySkipPermissions && args.permissionMode) {
       throw new Error(
