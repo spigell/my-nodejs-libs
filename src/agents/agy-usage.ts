@@ -18,10 +18,26 @@ export const AGY_USAGE_ARGS = [
  */
 export const AGY_USAGE_DEFAULT_TIMEOUT_MS = 30_000;
 
+export const AGY_MODEL_FAMILIES = ['gemini', 'argon', 'claude', 'gpt'] as const;
+export type AgyModelFamily = (typeof AGY_MODEL_FAMILIES)[number];
+
+export const AGY_WINDOW_NAMES: Record<string, string> = {
+  '18000': 'five_hour',
+  '604800': 'seven_day',
+  '5h': 'five_hour',
+  weekly: 'seven_day',
+};
+
+export function normalizeAgyWindow(window: string): string {
+  return AGY_WINDOW_NAMES[window] ?? window;
+}
+
 export type AgyUsageBucket = {
   id: string;
   name: string;
   window: string;
+  /** Normalized window identifier ('five_hour' | 'seven_day' | raw window). */
+  normalized_window: string;
   /** agy's own polarity: 1 = full headroom, 0 = exhausted. */
   remaining_fraction: number;
   /** Absolute ISO-8601, unlike Codex which reports seconds-until-reset. */
@@ -31,14 +47,38 @@ export type AgyUsageBucket = {
 
 export type AgyUsageGroup = {
   name: string;
+  /**
+   * Recognized model families drawing on this group (e.g. ['gemini'],
+   * ['argon'], or ['claude', 'gpt']).
+   */
+  families: AgyModelFamily[];
   /** Parsed from the group description; empty when agy stops emitting it. */
   models: string[];
   buckets: AgyUsageBucket[];
+  /** Five-hour rate limit window bucket, or null when the provider has none. */
+  five_hour: AgyUsageBucket | null;
+  /** Seven-day / weekly rate limit window bucket, or null when the provider has none. */
+  seven_day: AgyUsageBucket | null;
+};
+
+export type AgyFamilyUsage = {
+  family: AgyModelFamily;
+  group_name: string;
+  models: string[];
+  /** Five-hour rate limit window bucket, or null when the provider has none. */
+  five_hour: AgyUsageBucket | null;
+  /** Seven-day / weekly rate limit window bucket, or null when the provider has none. */
+  seven_day: AgyUsageBucket | null;
 };
 
 export type AgyUsage = {
   agent: 'agy';
   groups: AgyUsageGroup[];
+  /**
+   * Normalized view by model family. A missing quota window remains null
+   * (never synthetic 0 or 100%).
+   */
+  families: Record<AgyModelFamily, AgyFamilyUsage | null>;
 };
 
 export type GetAgyUsageOptions = {
@@ -91,9 +131,11 @@ export function parseAgyUsage(stdout: string): AgyUsage {
     if (!isJsonObject(data)) {
       throw new Error('Agy usage command_result is missing command.data');
     }
+    const groups = normalizeGroups(data.groups);
     return {
       agent: 'agy',
-      groups: normalizeGroups(data.groups),
+      groups,
+      families: buildFamilyMap(groups),
     };
   }
 
@@ -148,9 +190,7 @@ function runAgyUsageCommand(options: GetAgyUsageOptions): Promise<string> {
 
     const timer = setTimeout(() => {
       killChild();
-      finish(
-        new Error(`Agy usage command timed out after ${timeoutMs}ms`),
-      );
+      finish(new Error(`Agy usage command timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref?.();
 
@@ -199,10 +239,23 @@ function normalizeGroup(value: unknown, fieldName: string): AgyUsageGroup {
   if (!isJsonObject(value)) {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
+  const name = readString(value.name, `${fieldName}.name`);
+  const models = parseGroupModels(value.description);
+  const buckets = normalizeBuckets(value.buckets, `${fieldName}.buckets`);
+  const families = resolveAgyFamilies(name, value.description, buckets, models);
+
+  const fiveHour =
+    buckets.find((bucket) => bucket.normalized_window === 'five_hour') ?? null;
+  const sevenDay =
+    buckets.find((bucket) => bucket.normalized_window === 'seven_day') ?? null;
+
   return {
-    name: readString(value.name, `${fieldName}.name`),
-    models: parseGroupModels(value.description),
-    buckets: normalizeBuckets(value.buckets, `${fieldName}.buckets`),
+    name,
+    families,
+    models,
+    buckets,
+    five_hour: fiveHour,
+    seven_day: sevenDay,
   };
 }
 
@@ -219,14 +272,16 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
   if (!isJsonObject(value)) {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
-  const remainingFraction = readFiniteNumber(
+  const rawWindow = readString(value.window, `${fieldName}.window`);
+  const remainingFraction = readFraction(
     value.remaining_fraction,
     `${fieldName}.remaining_fraction`,
   );
   return {
     id: readString(value.id, `${fieldName}.id`),
     name: typeof value.name === 'string' ? value.name : '',
-    window: readString(value.window, `${fieldName}.window`),
+    window: rawWindow,
+    normalized_window: normalizeAgyWindow(rawWindow),
     remaining_fraction: remainingFraction,
     reset_time: readString(value.reset_time, `${fieldName}.reset_time`),
     limit_reached: remainingFraction <= 0,
@@ -239,19 +294,158 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
  * which group the configured model draws on.
  */
 function parseGroupModels(value: unknown): string[] {
-  if (typeof value !== 'string') {
-    return [];
+  if (typeof value === 'string') {
+    const marker = 'Models within this group:';
+    const markerIndex = value.indexOf(marker);
+    if (markerIndex !== -1) {
+      let rest = value.slice(markerIndex + marker.length).trim();
+      const lineEnd = rest.indexOf('\n');
+      if (lineEnd !== -1) {
+        rest = rest.slice(0, lineEnd).trim();
+      }
+      const sentenceEnd = rest.search(/[;.](?:\s+|\s*$)/);
+      if (sentenceEnd !== -1) {
+        rest = rest.slice(0, sentenceEnd);
+      }
+      return rest
+        .split(',')
+        .map((model) => model.trim().replace(/\.$/, ''))
+        .filter(Boolean);
+    }
   }
-  const marker = 'Models within this group:';
-  const markerIndex = value.indexOf(marker);
-  if (markerIndex === -1) {
-    return [];
+  return [];
+}
+
+export function resolveAgyFamilies(
+  name: string,
+  description?: unknown,
+  buckets?: readonly { id?: string; name?: string }[],
+  models?: readonly string[],
+): AgyModelFamily[] {
+  const groupModels =
+    models && models.length > 0 ? models : parseGroupModels(description);
+
+  const families: AgyModelFamily[] = [];
+  const addFamily = (family: AgyModelFamily) => {
+    if (!families.includes(family)) {
+      families.push(family);
+    }
+  };
+
+  if (groupModels.length > 0) {
+    for (const model of groupModels) {
+      const lower = model.toLowerCase();
+      if (lower.includes('argon')) {
+        addFamily('argon');
+      } else if (lower.includes('gemini')) {
+        addFamily('gemini');
+      }
+      if (lower.includes('claude')) {
+        addFamily('claude');
+      }
+      if (lower.includes('gpt')) {
+        addFamily('gpt');
+      }
+    }
   }
-  return value
-    .slice(markerIndex + marker.length)
-    .split(',')
-    .map((model) => model.trim().replace(/\.$/, ''))
-    .filter(Boolean);
+
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('argon')) {
+    addFamily('argon');
+  } else if (lowerName.includes('gemini') && !families.includes('argon')) {
+    addFamily('gemini');
+  }
+
+  if (lowerName.includes('claude')) {
+    addFamily('claude');
+  }
+  if (lowerName.includes('gpt')) {
+    addFamily('gpt');
+  }
+  if (
+    families.length === 0 &&
+    (lowerName.includes('3p') ||
+      lowerName.includes('third party') ||
+      lowerName.includes('third-party'))
+  ) {
+    addFamily('claude');
+    addFamily('gpt');
+  }
+
+  if (families.length === 0 && buckets && buckets.length > 0) {
+    const bucketText = buckets
+      .map((b) => `${b.id ?? ''} ${b.name ?? ''}`)
+      .join(' ')
+      .toLowerCase();
+
+    if (bucketText.includes('argon')) {
+      addFamily('argon');
+    } else if (bucketText.includes('gemini')) {
+      addFamily('gemini');
+    }
+    if (bucketText.includes('claude')) {
+      addFamily('claude');
+    }
+    if (bucketText.includes('gpt')) {
+      addFamily('gpt');
+    }
+    if (
+      families.length === 0 &&
+      (bucketText.includes('3p') ||
+        bucketText.includes('third party') ||
+        bucketText.includes('third-party'))
+    ) {
+      addFamily('claude');
+      addFamily('gpt');
+    }
+  }
+
+  return families;
+}
+
+/** Prefer a quota group that names the family itself over a group that merely lists its models. */
+export function agyFamilyGroups(
+  groups: readonly AgyUsageGroup[],
+): Map<AgyModelFamily, AgyUsageGroup> {
+  const owners = new Map<AgyModelFamily, AgyUsageGroup>();
+  const scores = new Map<AgyModelFamily, number>();
+  for (const group of groups) {
+    for (const family of group.families) {
+      const nameMatches = group.name.toLowerCase().includes(family);
+      const bucketMatches = group.buckets.some((bucket) =>
+        bucket.id.toLowerCase().includes(family),
+      );
+      const score = nameMatches ? 2 : bucketMatches ? 1 : 0;
+      if (!owners.has(family) || score > (scores.get(family) ?? -1)) {
+        owners.set(family, group);
+        scores.set(family, score);
+      }
+    }
+  }
+  return owners;
+}
+
+function buildFamilyMap(
+  groups: readonly AgyUsageGroup[],
+): Record<AgyModelFamily, AgyFamilyUsage | null> {
+  const result: Record<AgyModelFamily, AgyFamilyUsage | null> = {
+    gemini: null,
+    argon: null,
+    claude: null,
+    gpt: null,
+  };
+
+  for (const [family, group] of agyFamilyGroups(groups)) {
+    result[family] = {
+      family,
+      group_name: group.name,
+      models: group.models,
+      five_hour: group.five_hour,
+      seven_day: group.seven_day,
+    };
+  }
+
+  return result;
 }
 
 function readString(value: unknown, fieldName: string): string {
@@ -266,6 +460,16 @@ function readFiniteNumber(value: unknown, fieldName: string): number {
     throw new Error(`Agy usage field ${fieldName} must be a finite number`);
   }
   return value;
+}
+
+function readFraction(value: unknown, fieldName: string): number {
+  const fraction = readFiniteNumber(value, fieldName);
+  if (fraction < 0 || fraction > 1) {
+    throw new Error(
+      `Agy usage field ${fieldName} must be a finite number between 0 and 1`,
+    );
+  }
+  return fraction;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

@@ -3,7 +3,12 @@ import type { RequestHandler } from 'express';
 import type { App } from '../app/app.js';
 import { Server } from '../http/server.js';
 import type { Logging } from '../logger/logger.js';
-import { getAgyUsage, type AgyUsage } from './agy-usage.js';
+import {
+  agyFamilyGroups,
+  getAgyUsage,
+  resolveAgyFamilies,
+  type AgyUsage,
+} from './agy-usage.js';
 import { getClaudeUsage, type ClaudeUsage } from './claude-usage.js';
 import {
   CodexTokenRefreshError,
@@ -242,7 +247,9 @@ export class UsagePoller {
  * dashboard can chart them together. `window` is `five_hour` or `seven_day`
  * where the provider's window maps onto one, else the provider's own name;
  * `scope` is `all` for an account-wide window, the model family for Claude's
- * per-model weeks, and the quota group for agy.
+ * per-model weeks (`opus`, `sonnet`), and the model family for agy (`gemini`,
+ * `argon`, `claude`, `gpt`). Missing windows remain omitted rather than
+ * defaulting to zero or unlimited.
  */
 export type AgentUsageSample = {
   window: string;
@@ -306,15 +313,49 @@ export function usageSamples(
         resetsAt: now() / 1000 + window.reset_after_seconds,
       }));
     }
-    case 'agy':
-      return usage.groups.flatMap((group) =>
-        group.buckets.map((bucket) => ({
-          window: WINDOW_NAMES[bucket.window] ?? bucket.window,
-          scope: group.name,
-          usedPercent: (1 - bucket.remaining_fraction) * 100,
-          resetsAt: parseTimestamp(bucket.reset_time),
-        })),
-      );
+    case 'agy': {
+      const groups = usage.groups.map((group) => ({
+        ...group,
+        families:
+          group.families && group.families.length > 0
+            ? group.families
+            : resolveAgyFamilies(
+                group.name,
+                undefined,
+                group.buckets,
+                group.models,
+              ),
+      }));
+      const familyGroups = agyFamilyGroups(groups);
+
+      const seen = new Set<string>();
+      return groups.flatMap((group) => {
+        const families = group.families;
+        const scopes =
+          families.length > 0
+            ? families.filter((family) => familyGroups.get(family) === group)
+            : [group.name];
+
+        return scopes.flatMap((scope) =>
+          group.buckets.flatMap((bucket) => {
+            const window = WINDOW_NAMES[bucket.window] ?? bucket.window;
+            const key = `${window}\u0000${scope}`;
+            if (seen.has(key)) {
+              return [];
+            }
+            seen.add(key);
+            return [
+              {
+                window,
+                scope,
+                usedPercent: (1 - bucket.remaining_fraction) * 100,
+                resetsAt: parseTimestamp(bucket.reset_time),
+              },
+            ];
+          }),
+        );
+      });
+    }
   }
 }
 
@@ -447,10 +488,16 @@ function createUsageRecorder(
     help: 'Unix time at which the rate-limit window resets',
     labelNames,
   });
-  let previous = new Map<string, { agent: string; window: string; scope: string }>();
+  let previous = new Map<
+    string,
+    { agent: string; window: string; scope: string }
+  >();
 
   return (usage) => {
-    const current = new Map<string, { agent: string; window: string; scope: string }>();
+    const current = new Map<
+      string,
+      { agent: string; window: string; scope: string }
+    >();
     for (const sample of usageSamples(usage)) {
       const labels = { agent, window: sample.window, scope: sample.scope };
       current.set(`${sample.window}\u0000${sample.scope}`, labels);

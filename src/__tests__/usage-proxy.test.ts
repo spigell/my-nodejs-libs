@@ -17,7 +17,18 @@ import {
 import { CodexTokenRefreshError } from '../agents/codex-usage.js';
 import { Logging } from '../logger/logger.js';
 
-const agyUsage: AgentUsagePayload = { agent: 'agy', groups: [] };
+const emptyAgyFamilies = {
+  gemini: null,
+  argon: null,
+  claude: null,
+  gpt: null,
+};
+
+const agyUsage: AgentUsagePayload = {
+  agent: 'agy',
+  groups: [],
+  families: emptyAgyFamilies,
+};
 
 type CapturedResponse = { statusCode?: number; body?: unknown };
 
@@ -403,9 +414,19 @@ const claudeUsage = (opus: boolean): AgentUsagePayload => ({
 
 void test('usageSamples normalises every provider onto window and scope', () => {
   assert.deepEqual(usageSamples(claudeUsage(true)), [
-    { window: 'five_hour', scope: 'all', usedPercent: 12, resetsAt: Date.parse('2026-10-02T11:20:00Z') / 1000 },
+    {
+      window: 'five_hour',
+      scope: 'all',
+      usedPercent: 12,
+      resetsAt: Date.parse('2026-10-02T11:20:00Z') / 1000,
+    },
     { window: 'seven_day', scope: 'all', usedPercent: 35, resetsAt: undefined },
-    { window: 'seven_day', scope: 'opus', usedPercent: 50, resetsAt: Date.parse('2026-10-06T04:00:00Z') / 1000 },
+    {
+      window: 'seven_day',
+      scope: 'opus',
+      usedPercent: 50,
+      resetsAt: Date.parse('2026-10-06T04:00:00Z') / 1000,
+    },
   ]);
 
   const codexWindow = (used: number, seconds: number, reset: number) => ({
@@ -436,15 +457,20 @@ void test('usageSamples normalises every provider onto window and scope', () => 
 
   const [sample] = usageSamples({
     agent: 'agy',
+    families: emptyAgyFamilies,
     groups: [
       {
         name: 'Gemini Models',
-        models: [],
+        families: ['gemini'],
+        models: ['Gemini Flash', 'Gemini Pro'],
+        five_hour: null,
+        seven_day: null,
         buckets: [
           {
             id: 'gemini-5h',
             name: 'Five Hour Limit Remaining',
             window: '5h',
+            normalized_window: 'five_hour',
             remaining_fraction: 0.75,
             reset_time: '2026-10-02T10:00:00Z',
             limit_reached: false,
@@ -455,10 +481,309 @@ void test('usageSamples normalises every provider onto window and scope', () => 
   });
   assert.deepEqual(sample, {
     window: 'five_hour',
-    scope: 'Gemini Models',
+    scope: 'gemini',
     usedPercent: 25,
     resetsAt: Date.parse('2026-10-02T10:00:00Z') / 1000,
   });
+});
+
+void test('usageSamples maps all observed agy families and keeps missing windows explicit', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Gemini Models',
+        families: ['gemini'],
+        models: ['Gemini Flash', 'Gemini Pro'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-weekly',
+            name: 'Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.9,
+            reset_time: '2026-10-24T00:00:00Z',
+            limit_reached: false,
+          },
+          {
+            id: 'gemini-5h',
+            name: 'Five Hour Limit',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0.8,
+            reset_time: '2026-10-17T16:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+      {
+        name: 'Claude and GPT models',
+        families: ['claude', 'gpt'],
+        models: ['Claude Opus', 'Claude Sonnet', 'GPT-OSS'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: '3p-weekly',
+            name: 'Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.7,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+          {
+            id: '3p-5h',
+            name: 'Five Hour Limit',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0.6,
+            reset_time: '2026-10-17T17:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+      {
+        name: 'Gemini 4 Argon',
+        families: ['argon'],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-argon-wtu-weekly',
+            name: 'Argon Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 1,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+      {
+        name: 'Custom Unrecognized Group',
+        families: [],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'custom-weekly',
+            name: 'Custom Weekly',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.5,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+
+  // Gemini family
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'gemini' &&
+        s.window === 'five_hour' &&
+        Math.round(s.usedPercent) === 20,
+    ),
+  );
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'gemini' &&
+        s.window === 'seven_day' &&
+        Math.round(s.usedPercent) === 10,
+    ),
+  );
+
+  // Claude family (from shared 3p group)
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'claude' &&
+        s.window === 'five_hour' &&
+        Math.round(s.usedPercent) === 40,
+    ),
+  );
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'claude' &&
+        s.window === 'seven_day' &&
+        Math.round(s.usedPercent) === 30,
+    ),
+  );
+
+  // GPT family (from shared 3p group)
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'gpt' &&
+        s.window === 'five_hour' &&
+        Math.round(s.usedPercent) === 40,
+    ),
+  );
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'gpt' &&
+        s.window === 'seven_day' &&
+        Math.round(s.usedPercent) === 30,
+    ),
+  );
+
+  // Argon family: only seven_day exists, five_hour MUST NOT exist (not 0%, not 100%)
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'argon' && s.window === 'seven_day' && s.usedPercent === 0,
+    ),
+  );
+  assert.equal(
+    samples.some((s) => s.scope === 'argon' && s.window === 'five_hour'),
+    false,
+  );
+
+  // Unrecognized group falls back to group name
+  assert.ok(
+    samples.some(
+      (s) =>
+        s.scope === 'Custom Unrecognized Group' && s.window === 'seven_day',
+    ),
+  );
+});
+
+void test('usageSamples produces 0 to 100 usedPercent for boundary fractions', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Boundary Group',
+        families: ['gemini'],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'exhausted',
+            name: 'Exhausted',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0,
+            reset_time: '2026-10-17T17:00:00Z',
+            limit_reached: true,
+          },
+          {
+            id: 'full',
+            name: 'Full',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 1,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  assert.equal(samples.find((s) => s.window === 'five_hour')?.usedPercent, 100);
+  assert.equal(samples.find((s) => s.window === 'seven_day')?.usedPercent, 0);
+});
+
+void test('usageSamples assigns gemini scope when resolving families without cross-contaminating from prose', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Gemini Models',
+        families: [], // Forces fallback to resolveAgyFamilies
+        models: ['Gemini Flash', 'Gemini Pro'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-5h',
+            name: 'Five Hour Limit',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0.85,
+            reset_time: '2026-10-17T17:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0]?.scope, 'gemini');
+  assert.equal(samples[0]?.window, 'five_hour');
+  assert.equal(Math.round(samples[0]?.usedPercent ?? 0), 15);
+});
+
+void test('usageSamples prefers the dedicated family group over an earlier shared group', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Gemini Models',
+        families: ['gemini', 'argon'],
+        models: ['Gemini Flash', 'Gemini 4 Argon'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-weekly',
+            name: 'Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.9,
+            reset_time: '2026-10-24T00:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+      {
+        name: 'Gemini 4 Argon',
+        families: ['argon'],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-argon-wtu-weekly',
+            name: 'Argon Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.5,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  const argonSamples = samples.filter((s) => s.scope === 'argon');
+  assert.equal(argonSamples.length, 1);
+  assert.equal(argonSamples[0]?.window, 'seven_day');
+  assert.equal(Math.round(argonSamples[0]?.usedPercent ?? 0), 50);
 });
 
 void test('createAgentUsageProxy exports usage gauges and drops windows that disappear', async () => {
@@ -485,15 +810,30 @@ void test('createAgentUsageProxy exports usage gauges and drops windows that dis
     };
 
     const first = await metrics();
-    assert.match(first, /agent_usage_used_percent\{agent="claude",scope="all",window="five_hour"\} 12/);
-    assert.match(first, /agent_usage_used_percent\{agent="claude",scope="opus",window="seven_day"\} 50/);
-    assert.match(first, /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="five_hour"\} 1790\d+/);
-    assert.doesNotMatch(first, /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="seven_day"\}/);
+    assert.match(
+      first,
+      /agent_usage_used_percent\{agent="claude",scope="all",window="five_hour"\} 12/,
+    );
+    assert.match(
+      first,
+      /agent_usage_used_percent\{agent="claude",scope="opus",window="seven_day"\} 50/,
+    );
+    assert.match(
+      first,
+      /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="five_hour"\} 1790\d+/,
+    );
+    assert.doesNotMatch(
+      first,
+      /agent_usage_resets_at_timestamp_seconds\{agent="claude",scope="all",window="seven_day"\}/,
+    );
 
     opus = false;
     const second = await metrics();
     assert.doesNotMatch(second, /scope="opus"/);
-    assert.match(second, /agent_usage_used_percent\{agent="claude",scope="all",window="seven_day"\} 35/);
+    assert.match(
+      second,
+      /agent_usage_used_percent\{agent="claude",scope="all",window="seven_day"\} 35/,
+    );
   } finally {
     await proxy.stop();
   }
