@@ -206,7 +206,7 @@ void test('parseAgyUsage reads quota groups and normalizes families from command
 
   assert.equal(argon?.name, 'Gemini 4 Argon');
   assert.deepEqual(argon?.families, ['argon']);
-  assert.deepEqual(argon?.models, ['Gemini 4 Argon']);
+  assert.deepEqual(argon?.models, []);
 
   const weekly = gemini?.buckets.find(
     (bucket) => bucket.id === 'gemini-weekly',

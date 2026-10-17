@@ -549,7 +549,7 @@ void test('usageSamples maps all observed agy families and keeps missing windows
       {
         name: 'Gemini 4 Argon',
         families: ['argon'],
-        models: ['Gemini 4 Argon'],
+        models: [],
         five_hour: null,
         seven_day: null,
         buckets: [
@@ -693,6 +693,58 @@ void test('usageSamples assigns gemini scope when resolving families without cro
   assert.equal(samples[0]?.scope, 'gemini');
   assert.equal(samples[0]?.window, 'five_hour');
   assert.equal(Math.round(samples[0]?.usedPercent ?? 0), 15);
+});
+
+void test('usageSamples consistently keeps the first group matching a family across multiple groups', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Gemini Models',
+        families: ['gemini', 'argon'],
+        models: ['Gemini Flash', 'Gemini 4 Argon'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-weekly',
+            name: 'Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.9,
+            reset_time: '2026-10-24T00:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+      {
+        name: 'Gemini 4 Argon',
+        families: ['argon'],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-argon-wtu-weekly',
+            name: 'Argon Weekly Limit',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 0.5,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  const argonSamples = samples.filter((s) => s.scope === 'argon');
+  assert.equal(argonSamples.length, 1);
+  assert.equal(argonSamples[0]?.window, 'seven_day');
+  // First group's remaining_fraction is 0.9 -> 10% used, not second group's 50%
+  assert.equal(Math.round(argonSamples[0]?.usedPercent ?? 0), 10);
 });
 
 void test('createAgentUsageProxy exports usage gauges and drops windows that disappear', async () => {

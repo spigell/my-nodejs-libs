@@ -308,7 +308,26 @@ export function usageSamples(
         resetsAt: now() / 1000 + window.reset_after_seconds,
       }));
     }
-    case 'agy':
+    case 'agy': {
+      const familyGroups = new Map<string, (typeof usage.groups)[number]>();
+      for (const group of usage.groups) {
+        const families =
+          group.families && group.families.length > 0
+            ? group.families
+            : resolveAgyFamilies(
+                group.name,
+                undefined,
+                group.buckets,
+                group.models,
+              );
+        for (const family of families) {
+          if (!familyGroups.has(family)) {
+            familyGroups.set(family, group);
+          }
+        }
+      }
+
+      const seen = new Set<string>();
       return usage.groups.flatMap((group) => {
         const families =
           group.families && group.families.length > 0
@@ -319,17 +338,31 @@ export function usageSamples(
                 group.buckets,
                 group.models,
               );
-        const scopes = families.length > 0 ? families : [group.name];
+        const scopes =
+          families.length > 0
+            ? families.filter((family) => familyGroups.get(family) === group)
+            : [group.name];
 
         return scopes.flatMap((scope) =>
-          group.buckets.map((bucket) => ({
-            window: WINDOW_NAMES[bucket.window] ?? bucket.window,
-            scope,
-            usedPercent: (1 - bucket.remaining_fraction) * 100,
-            resetsAt: parseTimestamp(bucket.reset_time),
-          })),
+          group.buckets.flatMap((bucket) => {
+            const window = WINDOW_NAMES[bucket.window] ?? bucket.window;
+            const key = `${window}\u0000${scope}`;
+            if (seen.has(key)) {
+              return [];
+            }
+            seen.add(key);
+            return [
+              {
+                window,
+                scope,
+                usedPercent: (1 - bucket.remaining_fraction) * 100,
+                resetsAt: parseTimestamp(bucket.reset_time),
+              },
+            ];
+          }),
         );
       });
+    }
   }
 }
 

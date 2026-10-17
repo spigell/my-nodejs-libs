@@ -240,7 +240,7 @@ function normalizeGroup(value: unknown, fieldName: string): AgyUsageGroup {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
   const name = readString(value.name, `${fieldName}.name`);
-  const models = parseGroupModels(value.description, name);
+  const models = parseGroupModels(value.description);
   const buckets = normalizeBuckets(value.buckets, `${fieldName}.buckets`);
   const families = resolveAgyFamilies(name, value.description, buckets, models);
 
@@ -293,7 +293,7 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
  * The model list matters because quota is per group, so a gate has to know
  * which group the configured model draws on.
  */
-function parseGroupModels(value: unknown, groupName?: string): string[] {
+function parseGroupModels(value: unknown): string[] {
   if (typeof value === 'string') {
     const marker = 'Models within this group:';
     const markerIndex = value.indexOf(marker);
@@ -313,9 +313,6 @@ function parseGroupModels(value: unknown, groupName?: string): string[] {
         .filter(Boolean);
     }
   }
-  if (groupName && /argon/i.test(groupName)) {
-    return [groupName.trim()];
-  }
   return [];
 }
 
@@ -326,7 +323,7 @@ export function resolveAgyFamilies(
   models?: readonly string[],
 ): AgyModelFamily[] {
   const groupModels =
-    models && models.length > 0 ? models : parseGroupModels(description, name);
+    models && models.length > 0 ? models : parseGroupModels(description);
 
   const families: AgyModelFamily[] = [];
   const addFamily = (family: AgyModelFamily) => {
