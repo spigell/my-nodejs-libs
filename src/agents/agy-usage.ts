@@ -298,8 +298,16 @@ function parseGroupModels(value: unknown, groupName?: string): string[] {
     const marker = 'Models within this group:';
     const markerIndex = value.indexOf(marker);
     if (markerIndex !== -1) {
-      return value
-        .slice(markerIndex + marker.length)
+      let rest = value.slice(markerIndex + marker.length).trim();
+      const lineEnd = rest.indexOf('\n');
+      if (lineEnd !== -1) {
+        rest = rest.slice(0, lineEnd).trim();
+      }
+      const sentenceEnd = rest.search(/[;.](?:\s+|\s*$)/);
+      if (sentenceEnd !== -1) {
+        rest = rest.slice(0, sentenceEnd);
+      }
+      return rest
         .split(',')
         .map((model) => model.trim().replace(/\.$/, ''))
         .filter(Boolean);
@@ -317,40 +325,82 @@ export function resolveAgyFamilies(
   buckets?: readonly { id?: string; name?: string }[],
   models?: readonly string[],
 ): AgyModelFamily[] {
-  const text = [
-    name,
-    typeof description === 'string' ? description : '',
-    ...(buckets?.map((b) => `${b.id ?? ''} ${b.name ?? ''}`) ?? []),
-    ...(models ?? []),
-  ]
-    .join(' ')
-    .toLowerCase();
+  const groupModels =
+    models && models.length > 0 ? models : parseGroupModels(description, name);
 
   const families: AgyModelFamily[] = [];
+  const addFamily = (family: AgyModelFamily) => {
+    if (!families.includes(family)) {
+      families.push(family);
+    }
+  };
 
-  // Argon has separate quota on Pro plans and its own weekly bucket.
-  if (text.includes('argon')) {
-    families.push('argon');
-  } else if (text.includes('gemini')) {
-    families.push('gemini');
+  if (groupModels.length > 0) {
+    for (const model of groupModels) {
+      const lower = model.toLowerCase();
+      if (lower.includes('argon')) {
+        addFamily('argon');
+      } else if (lower.includes('gemini')) {
+        addFamily('gemini');
+      }
+      if (lower.includes('claude')) {
+        addFamily('claude');
+      }
+      if (lower.includes('gpt')) {
+        addFamily('gpt');
+      }
+    }
   }
 
-  if (text.includes('claude')) {
-    families.push('claude');
+  const lowerName = name.toLowerCase();
+  if (lowerName.includes('argon')) {
+    addFamily('argon');
+  } else if (lowerName.includes('gemini') && !families.includes('argon')) {
+    addFamily('gemini');
   }
 
-  if (text.includes('gpt')) {
-    families.push('gpt');
+  if (lowerName.includes('claude')) {
+    addFamily('claude');
   }
-
-  // agy pools 3p models under a shared quota group
+  if (lowerName.includes('gpt')) {
+    addFamily('gpt');
+  }
   if (
     families.length === 0 &&
-    (text.includes('3p') ||
-      text.includes('third party') ||
-      text.includes('third-party'))
+    (lowerName.includes('3p') ||
+      lowerName.includes('third party') ||
+      lowerName.includes('third-party'))
   ) {
-    families.push('claude', 'gpt');
+    addFamily('claude');
+    addFamily('gpt');
+  }
+
+  if (families.length === 0 && buckets && buckets.length > 0) {
+    const bucketText = buckets
+      .map((b) => `${b.id ?? ''} ${b.name ?? ''}`)
+      .join(' ')
+      .toLowerCase();
+
+    if (bucketText.includes('argon')) {
+      addFamily('argon');
+    } else if (bucketText.includes('gemini')) {
+      addFamily('gemini');
+    }
+    if (bucketText.includes('claude')) {
+      addFamily('claude');
+    }
+    if (bucketText.includes('gpt')) {
+      addFamily('gpt');
+    }
+    if (
+      families.length === 0 &&
+      (bucketText.includes('3p') ||
+        bucketText.includes('third party') ||
+        bucketText.includes('third-party'))
+    ) {
+      addFamily('claude');
+      addFamily('gpt');
+    }
   }
 
   return families;

@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getAgyUsage, parseAgyUsage } from '../agents/agy-usage.js';
+import {
+  getAgyUsage,
+  parseAgyUsage,
+  resolveAgyFamilies,
+} from '../agents/agy-usage.js';
 
 /**
  * Captured verbatim from `agy -p '/usage' --dangerously-skip-permissions
- * --output-format stream-json` on agy 1.2.7. The trailing `result` line is
- * included because the parser must ignore it and read only `command_result`.
+ * --output-format stream-json` on agy 1.3.3 (October 2026). The trailing `result`
+ * line is included because the parser must ignore it and read only
+ * `command_result`.
+ *
+ * Upstream observation:
+ * - Gemini Models: weekly (`gemini-weekly`) and five-hour (`gemini-5h`)
+ * - Claude and GPT models: weekly (`3p-weekly`) and five-hour (`3p-5h`)
+ * - Gemini 4 Argon: weekly (`gemini-argon-wtu-weekly`) only. Upstream agy CLI emits
+ *   no five-hour bucket for Argon; the absent window originates directly from the
+ *   provider/CLI layer, not sidecar parsing or downstream metric normalization.
  */
 const commandResultLine = JSON.stringify({
   event: 'command_result',
@@ -14,7 +26,7 @@ const commandResultLine = JSON.stringify({
     name: 'usage',
     data: {
       description:
-        'Within each group, models share a weekly limit and a 5-hour limit.',
+        'Within each group, models share a weekly limit and a 5-hour limit. Quota is consumed proportionally to the cost of the tokens. Thus, limits will last longer with shorter tasks or using more cost-effective models. The 5-hour limit smooths out aggregate demand to fairly distribute global capacity across all users, while your weekly limit is tied directly to your individual tier.',
       groups: [
         {
           name: 'Gemini Models',
@@ -23,18 +35,20 @@ const commandResultLine = JSON.stringify({
             {
               id: 'gemini-weekly',
               name: 'Weekly Limit Remaining',
-              description: 'You have used some of your weekly limit.',
+              description:
+                'You have used some of your weekly limit, it will fully refresh in 6 days, 11 hours.',
               window: 'weekly',
-              remaining_fraction: 0.8076949119567871,
-              reset_time: '2026-09-23T02:28:11Z',
+              remaining_fraction: 0.9186660051345825,
+              reset_time: '2026-10-24T00:00:28Z',
             },
             {
               id: 'gemini-5h',
               name: 'Five Hour Limit Remaining',
-              description: 'You have used some of your 5-hour limit.',
+              description:
+                'You have used some of your 5-hour limit, it will fully refresh in 4 hours, 39 minutes.',
               window: '5h',
-              remaining_fraction: 0.5055623054504395,
-              reset_time: '2026-09-19T14:57:44Z',
+              remaining_fraction: 0.9433193802833557,
+              reset_time: '2026-10-17T16:59:43Z',
             },
           ],
         },
@@ -47,15 +61,15 @@ const commandResultLine = JSON.stringify({
               id: '3p-weekly',
               name: 'Weekly Limit Remaining',
               window: 'weekly',
-              remaining_fraction: 0.5732713341712952,
-              reset_time: '2026-09-26T02:00:23Z',
+              remaining_fraction: 1,
+              reset_time: '2026-10-24T12:20:07Z',
             },
             {
               id: '3p-5h',
               name: 'Five Hour Limit Remaining',
               window: '5h',
-              remaining_fraction: 0,
-              reset_time: '2026-09-19T14:51:55Z',
+              remaining_fraction: 1,
+              reset_time: '2026-10-17T17:20:07Z',
             },
           ],
         },
@@ -69,7 +83,7 @@ const commandResultLine = JSON.stringify({
               name: 'Gemini 4 Argon Weekly Limit',
               window: 'weekly',
               remaining_fraction: 1,
-              reset_time: '2026-10-24T12:00:25Z',
+              reset_time: '2026-10-24T12:20:07Z',
             },
           ],
         },
@@ -83,8 +97,85 @@ const resultLine = JSON.stringify({
   result: {
     conversation_id: '',
     status: 'SUCCESS',
+    response:
+      'Gemini Models\tWeekly Limit Remaining\t92%\t2026-10-24T00:00:28Z\nGemini Models\tFive Hour Limit Remaining\t94%\t2026-10-17T16:59:43Z\nClaude and GPT models\tWeekly Limit Remaining\t100%\t2026-10-24T12:20:07Z\nClaude and GPT models\tFive Hour Limit Remaining\t100%\t2026-10-17T17:20:07Z\nGemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2026-10-24T12:20:07Z\n',
+    duration_seconds: 0,
     num_turns: 0,
-    usage: { total_tokens: 0 },
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      thinking_tokens: 0,
+      cache_read_tokens: 0,
+      total_tokens: 0,
+    },
+    command: {
+      name: 'usage',
+      data: {
+        description:
+          'Within each group, models share a weekly limit and a 5-hour limit. Quota is consumed proportionally to the cost of the tokens. Thus, limits will last longer with shorter tasks or using more cost-effective models. The 5-hour limit smooths out aggregate demand to fairly distribute global capacity across all users, while your weekly limit is tied directly to your individual tier.',
+        groups: [
+          {
+            name: 'Gemini Models',
+            description: 'Models within this group: Gemini Flash, Gemini Pro',
+            buckets: [
+              {
+                id: 'gemini-weekly',
+                name: 'Weekly Limit Remaining',
+                description:
+                  'You have used some of your weekly limit, it will fully refresh in 6 days, 11 hours.',
+                window: 'weekly',
+                remaining_fraction: 0.9186660051345825,
+                reset_time: '2026-10-24T00:00:28Z',
+              },
+              {
+                id: 'gemini-5h',
+                name: 'Five Hour Limit Remaining',
+                description:
+                  'You have used some of your 5-hour limit, it will fully refresh in 4 hours, 39 minutes.',
+                window: '5h',
+                remaining_fraction: 0.9433193802833557,
+                reset_time: '2026-10-17T16:59:43Z',
+              },
+            ],
+          },
+          {
+            name: 'Claude and GPT models',
+            description:
+              'Models within this group: Claude Opus, Claude Sonnet, GPT-OSS',
+            buckets: [
+              {
+                id: '3p-weekly',
+                name: 'Weekly Limit Remaining',
+                window: 'weekly',
+                remaining_fraction: 1,
+                reset_time: '2026-10-24T12:20:07Z',
+              },
+              {
+                id: '3p-5h',
+                name: 'Five Hour Limit Remaining',
+                window: '5h',
+                remaining_fraction: 1,
+                reset_time: '2026-10-17T17:20:07Z',
+              },
+            ],
+          },
+          {
+            name: 'Gemini 4 Argon',
+            description:
+              'For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota bucket) is available on Ultra plans.',
+            buckets: [
+              {
+                id: 'gemini-argon-wtu-weekly',
+                name: 'Gemini 4 Argon Weekly Limit',
+                window: 'weekly',
+                remaining_fraction: 1,
+                reset_time: '2026-10-24T12:20:07Z',
+              },
+            ],
+          },
+        ],
+      },
+    },
   },
 });
 
@@ -122,13 +213,16 @@ void test('parseAgyUsage reads quota groups and normalizes families from command
   );
   assert.equal(weekly?.window, 'weekly');
   assert.equal(weekly?.normalized_window, 'seven_day');
-  assert.equal(weekly?.remaining_fraction, 0.8076949119567871);
-  assert.equal(weekly?.reset_time, '2026-09-23T02:28:11Z');
+  assert.equal(weekly?.remaining_fraction, 0.9186660051345825);
+  assert.equal(weekly?.reset_time, '2026-10-24T00:00:28Z');
   assert.equal(weekly?.limit_reached, false);
 
   const fiveHour = gemini?.buckets.find((bucket) => bucket.id === 'gemini-5h');
   assert.equal(fiveHour?.window, '5h');
   assert.equal(fiveHour?.normalized_window, 'five_hour');
+  assert.equal(fiveHour?.remaining_fraction, 0.9433193802833557);
+  assert.equal(fiveHour?.reset_time, '2026-10-17T16:59:43Z');
+  assert.equal(fiveHour?.limit_reached, false);
 });
 
 void test('parseAgyUsage populates normalized family map covering all observed families', () => {
@@ -162,13 +256,113 @@ void test('parseAgyUsage populates normalized family map covering all observed f
 });
 
 void test('parseAgyUsage marks an exhausted bucket as limit reached', () => {
-  const usage = parseAgyUsage(stdout);
-  const exhausted = usage.groups
-    .flatMap((group) => group.buckets)
-    .find((bucket) => bucket.id === '3p-5h');
+  const exhaustedPayload = JSON.stringify({
+    event: 'command_result',
+    command: {
+      name: 'usage',
+      data: {
+        groups: [
+          {
+            name: 'Exhausted Group',
+            description: 'Custom',
+            buckets: [
+              {
+                id: 'exhausted-5h',
+                window: '5h',
+                remaining_fraction: 0,
+                reset_time: '2026-10-17T17:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  const usage = parseAgyUsage(exhaustedPayload);
+  const exhausted = usage.groups[0]?.buckets[0];
 
   assert.equal(exhausted?.remaining_fraction, 0);
   assert.equal(exhausted?.limit_reached, true);
+});
+
+void test('resolveAgyFamilies distinguishes group models from explanatory prose', () => {
+  // Description mentions Argon in explanatory prose, but the group and models are Gemini
+  const geminiFamilies = resolveAgyFamilies(
+    'Gemini Models',
+    'Models within this group: Gemini Flash, Gemini Pro. Argon quota is separate.',
+  );
+  assert.deepEqual(geminiFamilies, ['gemini']);
+
+  // Explanatory prose mentioning Argon without "Models within this group:"
+  const geminiProseFamilies = resolveAgyFamilies(
+    'Gemini Models',
+    'Argon quota is separate.',
+  );
+  assert.deepEqual(geminiProseFamilies, ['gemini']);
+
+  // Description mentions Gemini in explanatory prose, but the group is Argon
+  const argonFamilies = resolveAgyFamilies(
+    'Gemini 4 Argon',
+    'For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota bucket) is available on Ultra plans.',
+  );
+  assert.deepEqual(argonFamilies, ['argon']);
+});
+
+void test('parseAgyUsage correctly resolves families when descriptions contain explanatory prose mentioning other families', () => {
+  const payload = JSON.stringify({
+    event: 'command_result',
+    command: {
+      name: 'usage',
+      data: {
+        groups: [
+          {
+            name: 'Gemini Models',
+            description:
+              'Models within this group: Gemini Flash, Gemini Pro. Argon quota is separate.',
+            buckets: [
+              {
+                id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.9,
+                reset_time: '2026-10-24T00:00:00Z',
+              },
+              {
+                id: 'gemini-5h',
+                window: '5h',
+                remaining_fraction: 0.8,
+                reset_time: '2026-10-17T17:00:00Z',
+              },
+            ],
+          },
+          {
+            name: 'Gemini 4 Argon',
+            description:
+              'For paid Pro plans, Argon quota is separate. Higher Argon quota (included as part of the larger Gemini quota bucket) is available on Ultra plans.',
+            buckets: [
+              {
+                id: 'gemini-argon-wtu-weekly',
+                window: 'weekly',
+                remaining_fraction: 1.0,
+                reset_time: '2026-10-24T12:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+
+  const usage = parseAgyUsage(payload);
+  assert.deepEqual(usage.groups[0]?.families, ['gemini']);
+  assert.deepEqual(usage.groups[0]?.models, ['Gemini Flash', 'Gemini Pro']);
+  assert.equal(usage.families.gemini?.group_name, 'Gemini Models');
+  assert.equal(usage.families.gemini?.five_hour?.id, 'gemini-5h');
+  assert.equal(usage.families.gemini?.seven_day?.id, 'gemini-weekly');
+
+  assert.deepEqual(usage.groups[1]?.families, ['argon']);
+  assert.equal(usage.families.argon?.group_name, 'Gemini 4 Argon');
+  assert.equal(usage.families.argon?.five_hour, null);
+  assert.equal(usage.families.argon?.seven_day?.id, 'gemini-argon-wtu-weekly');
 });
 
 void test('parseAgyUsage leaves missing windows explicit and handles partial groups', () => {

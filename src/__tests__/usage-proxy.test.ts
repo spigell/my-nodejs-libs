@@ -662,6 +662,39 @@ void test('usageSamples maps all observed agy families and keeps missing windows
   );
 });
 
+void test('usageSamples assigns gemini scope when resolving families without cross-contaminating from prose', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Gemini Models',
+        families: [], // Forces fallback to resolveAgyFamilies
+        models: ['Gemini Flash', 'Gemini Pro'],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'gemini-5h',
+            name: 'Five Hour Limit',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0.85,
+            reset_time: '2026-10-17T17:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  assert.equal(samples.length, 1);
+  assert.equal(samples[0]?.scope, 'gemini');
+  assert.equal(samples[0]?.window, 'five_hour');
+  assert.equal(Math.round(samples[0]?.usedPercent ?? 0), 15);
+});
+
 void test('createAgentUsageProxy exports usage gauges and drops windows that disappear', async () => {
   let opus = true;
   const proxy = createAgentUsageProxy({
