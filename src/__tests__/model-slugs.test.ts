@@ -566,6 +566,21 @@ void test('broad Claude display names observe their family weekly windows', () =
   }
 });
 
+void test('Claude scoped ids preserve legacy names without crossing versions', () => {
+  for (const [scope, expectedSlug, expectedLegacy] of [
+    [{ id: 'claude-opus-5-5', display_name: 'Claude Opus' }, 'quota_limit', 'quota_limit'],
+    [{ id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus' }, 'available', 'quota_limit'],
+  ] as const) {
+    const payload = claudeBase();
+    payload.limits.push({
+      kind: 'model_limit', percent: 100, is_active: true, group: null,
+      resets_at: null, scope: { model: scope },
+    });
+    assert.equal(evaluateAgentUsage('claude', payload, 'claude-opus-5-5', policy, null, now).reasonCode, expectedSlug);
+    assert.equal(evaluateAgentUsage('claude', payload, 'Claude Opus', policy, null, now).reasonCode, expectedLegacy);
+  }
+});
+
 // --- 4. Codex slugs: present in map and evaluateAgentUsage works identically ---
 for (const slug of CODEX_SLUGS) {
   void test(`MODEL_SLUG_MAP defines Codex slug ${slug}`, () => {

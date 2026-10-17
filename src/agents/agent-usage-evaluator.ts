@@ -211,8 +211,9 @@ export function evaluateAgentUsage(
       const typed: ClaudeUsageLimit = item;
       if (!typed.is_active || typed.percent < 100) continue;
       const scoped = typed.scope?.model;
-      // A recognized model id is more precise than a broad display name.
-      const scopeNames = scoped?.id && getModelSlugEntry(scoped.id)?.slug === scoped.id
+      // A versioned id identifies the model more precisely than a broad
+      // display name. Legacy unversioned registry names still use that name.
+      const scopeNames = scoped?.id && /\d/.test(scoped.id) && /\d/.test(model ?? '')
         ? [scoped.id] : [scoped?.id, scoped?.display_name];
       const applies = !scoped || !model || scopeNames
         .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
