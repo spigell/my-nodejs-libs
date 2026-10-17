@@ -28,7 +28,9 @@ The only automation configured in-tree is the GitHub Actions tag release workflo
 
 ## Validation Commands
 
-Use the existing package scripts when verifying changes:
+Install dependencies first with `yarn install --frozen-lockfile`. `node_modules` is untracked and not part of any diff, so every step may install it, a read-only reviewer included.
+
+Then use the existing package scripts when verifying changes:
 
 - `yarn typecheck`
 - `yarn lint`
