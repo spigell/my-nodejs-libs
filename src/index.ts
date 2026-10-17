@@ -18,6 +18,7 @@ export * from './agents/codex-isolation.js';
 export * from './agents/gemini-isolation.js';
 export * from './agents/gemini-adapter.js';
 export * from './agents/isolated-skills.js';
+export * from './agents/model-slugs.js';
 export * from './agents/protocol.js';
 export * from './agents/usage-proxy.js';
 export * from './fuel/wallet/wallet.js';

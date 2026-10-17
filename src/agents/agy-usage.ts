@@ -1,5 +1,6 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
+import { getModelSlugEntry } from './model-slugs.js';
 
 export const AGY_USAGE_COMMAND = 'agy';
 export const AGY_USAGE_ARGS = [
@@ -332,8 +333,16 @@ export function resolveAgyFamilies(
     }
   };
 
+  const isAgyFamily = (value: unknown): value is AgyModelFamily =>
+    typeof value === 'string' &&
+    (AGY_MODEL_FAMILIES as readonly string[]).includes(value);
+
   if (groupModels.length > 0) {
     for (const model of groupModels) {
+      const slugEntry = getModelSlugEntry(model);
+      if (slugEntry && isAgyFamily(slugEntry.family)) {
+        addFamily(slugEntry.family);
+      }
       const lower = model.toLowerCase();
       if (lower.includes('argon')) {
         addFamily('argon');
@@ -347,6 +356,11 @@ export function resolveAgyFamilies(
         addFamily('gpt');
       }
     }
+  }
+
+  const slugEntry = getModelSlugEntry(name);
+  if (slugEntry && isAgyFamily(slugEntry.family)) {
+    addFamily(slugEntry.family);
   }
 
   const lowerName = name.toLowerCase();

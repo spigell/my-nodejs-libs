@@ -1,6 +1,7 @@
 import { agyFamilyGroups, resolveAgyFamilies, type AgyModelFamily, type AgyUsage, type AgyUsageBucket, type AgyUsageGroup } from './agy-usage.js';
 import type { ClaudeUsage, ClaudeUsageLimit, ClaudeUsageWindow } from './claude-usage.js';
 import type { CodexUsage } from './codex-usage.js';
+import { getModelSlugEntry } from './model-slugs.js';
 import type { AgentUsageKind } from './usage-proxy.js';
 
 export type AgentWeeklyPolicy = { maxPercent: number; pacing: 'off' | 'daily' };
@@ -175,6 +176,9 @@ export function evaluateAgentUsage(
     if (!claudePayload(root)) return verdict;
     const usage = payload as ClaudeUsage;
     const model = defaultModel?.trim().toLowerCase();
+    const slugEntry = model ? getModelSlugEntry(model) : undefined;
+    // Agy display names also occur in the slug map with the broader `claude`
+    // family. Claude's own windows use the Opus/Sonnet family instead.
     const family = model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null;
     verdict.quotaFamily = family;
     const selected: Array<[string, ClaudeUsageWindow | null]> = [
@@ -207,12 +211,30 @@ export function evaluateAgentUsage(
       const typed: ClaudeUsageLimit = item;
       if (!typed.is_active || typed.percent < 100) continue;
       const scoped = typed.scope?.model;
-      const applies = !scoped || !model || [scoped.id, scoped.display_name]
+      // A dated id has the same model version as its canonical slug. Check
+      // that version before considering the display name, which may be broad.
+      const version = (value: string) => value.replace(/-\d{8}$/, '')
+        .match(/\d+(?:[.-]\d+)*/g)?.join('-').replaceAll('.', '-');
+      const scopeVersion = scoped?.id && /\d/.test(scoped.id) ? version(scoped.id) : null;
+      const modelVersion = model && /\d/.test(model) ? version(model) : null;
+      const versionMatches = !scopeVersion || !modelVersion || scopeVersion === modelVersion;
+      const scopeNames = [scoped?.id, scoped?.display_name];
+      const applies = !scoped || !model || (versionMatches && scopeNames
         .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
         .some((name) => {
           const candidate = name.trim().toLowerCase();
-          return candidate === model || model.includes(candidate) || candidate.includes(model);
-        });
+          if (candidate === model) return true;
+          if (slugEntry) {
+            return slugEntry.usageNames.some((u) => {
+              const uLower = u.toLowerCase();
+              // A versioned scope must match a versioned alias. Otherwise a
+              // different version matches through a broad name like "Opus".
+              if (/\d/.test(candidate) && version(candidate) !== version(uLower)) return false;
+              return candidate === uLower || candidate.includes(uLower) || uLower.includes(candidate);
+            });
+          }
+          return model.includes(candidate) || (!/\d/.test(candidate) && candidate.includes(model));
+        }));
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
   } else if (adapter === 'agy') {
