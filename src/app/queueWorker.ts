@@ -21,6 +21,7 @@ export abstract class QueueWorker<
   private taskQueue: QueueTask<Types[keyof Types]>[] = [];
   private concurrency: number;
   private runningTasks: number = 0;
+  private draining = false;
 
   protected handlers: {
     [K in keyof Types]: (payload: Types[K]) => Promise<void>;
@@ -38,6 +39,11 @@ export abstract class QueueWorker<
     interval: number = 5,
   ) {
     super(name, appId, prom, logging, {}, interval);
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
+      throw new RangeError(
+        'QueueWorker concurrency must be a positive finite integer',
+      );
+    }
     this.concurrency = concurrency;
     this.handlers = handlers;
   }
@@ -52,9 +58,21 @@ export abstract class QueueWorker<
       length: this.taskQueue.length,
     });
 
-    while (this.runningTasks < this.concurrency && this.taskQueue.length > 0) {
-      const task = this.taskQueue.shift();
-      if (task) {
+    this.drain();
+    return Promise.resolve();
+  }
+
+  private drain(): void {
+    if (this.draining) return;
+    this.draining = true;
+
+    try {
+      while (
+        this.runningTasks < this.concurrency &&
+        this.taskQueue.length > 0
+      ) {
+        const task = this.taskQueue.shift();
+        if (!task) continue;
         this.runningTasks++;
 
         const action =
@@ -71,17 +89,21 @@ export abstract class QueueWorker<
               error: err.message,
             });
           })
-          .finally(() => this.runningTasks--);
+          .finally(() => {
+            this.runningTasks--;
+            this.drain();
+          });
       }
+    } finally {
+      this.draining = false;
     }
-
-    return Promise.resolve();
   }
 
   public enqueueTask<K extends keyof Types>(
     task: QueueTask<Types[K]> & { kind: K },
   ) {
     this.taskQueue.push(task);
+    this.drain();
   }
 
   private async dispatchWithRetry<K extends keyof Types>(
