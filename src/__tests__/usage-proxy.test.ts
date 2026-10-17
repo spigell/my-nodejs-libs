@@ -662,6 +662,46 @@ void test('usageSamples maps all observed agy families and keeps missing windows
   );
 });
 
+void test('usageSamples produces 0 to 100 usedPercent for boundary fractions', () => {
+  const agyPayload: AgentUsagePayload = {
+    agent: 'agy',
+    families: emptyAgyFamilies,
+    groups: [
+      {
+        name: 'Boundary Group',
+        families: ['gemini'],
+        models: [],
+        five_hour: null,
+        seven_day: null,
+        buckets: [
+          {
+            id: 'exhausted',
+            name: 'Exhausted',
+            window: '5h',
+            normalized_window: 'five_hour',
+            remaining_fraction: 0,
+            reset_time: '2026-10-17T17:00:00Z',
+            limit_reached: true,
+          },
+          {
+            id: 'full',
+            name: 'Full',
+            window: 'weekly',
+            normalized_window: 'seven_day',
+            remaining_fraction: 1,
+            reset_time: '2026-10-24T12:00:00Z',
+            limit_reached: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  const samples = usageSamples(agyPayload);
+  assert.equal(samples.find((s) => s.window === 'five_hour')?.usedPercent, 100);
+  assert.equal(samples.find((s) => s.window === 'seven_day')?.usedPercent, 0);
+});
+
 void test('usageSamples assigns gemini scope when resolving families without cross-contaminating from prose', () => {
   const agyPayload: AgentUsagePayload = {
     agent: 'agy',

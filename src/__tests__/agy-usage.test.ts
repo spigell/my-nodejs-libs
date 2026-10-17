@@ -489,6 +489,42 @@ void test('parseAgyUsage rejects malformed data', () => {
           buckets: [
             {
               id: 'b',
+              window: '5h',
+              remaining_fraction: -0.01,
+              reset_time: '2026-10-01',
+            },
+          ],
+        },
+      ],
+    },
+    /remaining_fraction must be a finite number between 0 and 1/,
+  );
+  assertParseError(
+    {
+      groups: [
+        {
+          name: 'G',
+          buckets: [
+            {
+              id: 'b',
+              window: '5h',
+              remaining_fraction: 1.2,
+              reset_time: '2026-10-01',
+            },
+          ],
+        },
+      ],
+    },
+    /remaining_fraction must be a finite number between 0 and 1/,
+  );
+  assertParseError(
+    {
+      groups: [
+        {
+          name: 'G',
+          buckets: [
+            {
+              id: 'b',
               window: '',
               remaining_fraction: 1,
               reset_time: '2026-10-01',
@@ -521,6 +557,42 @@ void test('parseAgyUsage rejects malformed data', () => {
 
   const missingData = JSON.stringify({ event: 'command_result', command: {} });
   assert.throws(() => parseAgyUsage(missingData), /missing command\.data/);
+});
+
+void test('parseAgyUsage accepts boundary remaining_fraction values 0 and 1', () => {
+  const payload = JSON.stringify({
+    event: 'command_result',
+    command: {
+      name: 'usage',
+      data: {
+        groups: [
+          {
+            name: 'Boundary Group',
+            buckets: [
+              {
+                id: 'zero',
+                window: '5h',
+                remaining_fraction: 0,
+                reset_time: '2026-10-24T12:00:00Z',
+              },
+              {
+                id: 'one',
+                window: 'weekly',
+                remaining_fraction: 1,
+                reset_time: '2026-10-24T12:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+
+  const usage = parseAgyUsage(payload);
+  assert.equal(usage.groups[0]?.buckets[0]?.remaining_fraction, 0);
+  assert.equal(usage.groups[0]?.buckets[0]?.limit_reached, true);
+  assert.equal(usage.groups[0]?.buckets[1]?.remaining_fraction, 1);
+  assert.equal(usage.groups[0]?.buckets[1]?.limit_reached, false);
 });
 
 void test('parseAgyUsage rejects output without a command_result event', () => {

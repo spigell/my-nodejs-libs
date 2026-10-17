@@ -273,7 +273,7 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
   const rawWindow = readString(value.window, `${fieldName}.window`);
-  const remainingFraction = readFiniteNumber(
+  const remainingFraction = readFraction(
     value.remaining_fraction,
     `${fieldName}.remaining_fraction`,
   );
@@ -460,6 +460,16 @@ function readFiniteNumber(value: unknown, fieldName: string): number {
     throw new Error(`Agy usage field ${fieldName} must be a finite number`);
   }
   return value;
+}
+
+function readFraction(value: unknown, fieldName: string): number {
+  const fraction = readFiniteNumber(value, fieldName);
+  if (fraction < 0 || fraction > 1) {
+    throw new Error(
+      `Agy usage field ${fieldName} must be a finite number between 0 and 1`,
+    );
+  }
+  return fraction;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
