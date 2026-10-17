@@ -1,6 +1,7 @@
 import { agyFamilyGroups, resolveAgyFamilies, type AgyModelFamily, type AgyUsage, type AgyUsageBucket, type AgyUsageGroup } from './agy-usage.js';
 import type { ClaudeUsage, ClaudeUsageLimit, ClaudeUsageWindow } from './claude-usage.js';
 import type { CodexUsage } from './codex-usage.js';
+import { getModelSlugEntry } from './model-slugs.js';
 import type { AgentUsageKind } from './usage-proxy.js';
 
 export type AgentWeeklyPolicy = { maxPercent: number; pacing: 'off' | 'daily' };
@@ -175,7 +176,8 @@ export function evaluateAgentUsage(
     if (!claudePayload(root)) return verdict;
     const usage = payload as ClaudeUsage;
     const model = defaultModel?.trim().toLowerCase();
-    const family = model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null;
+    const slugEntry = model ? getModelSlugEntry(model) : undefined;
+    const family = (slugEntry && slugEntry.family !== undefined ? slugEntry.family : null) ?? (model?.includes('opus') ? 'opus' : model?.includes('sonnet') ? 'sonnet' : null);
     verdict.quotaFamily = family;
     const selected: Array<[string, ClaudeUsageWindow | null]> = [
       ['5h', usage.five_hour], ['7d', usage.seven_day],
@@ -211,7 +213,14 @@ export function evaluateAgentUsage(
         .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
         .some((name) => {
           const candidate = name.trim().toLowerCase();
-          return candidate === model || model.includes(candidate) || candidate.includes(model);
+          if (candidate === model || model.includes(candidate) || candidate.includes(model)) return true;
+          if (slugEntry) {
+            return slugEntry.usageNames.some((u) => {
+              const uLower = u.toLowerCase();
+              return candidate === uLower || candidate.includes(uLower) || uLower.includes(candidate);
+            });
+          }
+          return false;
         });
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
