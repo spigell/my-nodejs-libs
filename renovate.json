@@ -1,6 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "github>spigell/my-renovate"
+  "extends": ["github>spigell/my-renovate"],
+  "packageRules": [
+    {
+      // typescript-eslint declares peer range typescript ">=4.8.4 <6.1.0"
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.1.0"
+    }
   ]
 }
