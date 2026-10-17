@@ -18,10 +18,26 @@ export const AGY_USAGE_ARGS = [
  */
 export const AGY_USAGE_DEFAULT_TIMEOUT_MS = 30_000;
 
+export const AGY_MODEL_FAMILIES = ['gemini', 'argon', 'claude', 'gpt'] as const;
+export type AgyModelFamily = (typeof AGY_MODEL_FAMILIES)[number];
+
+export const AGY_WINDOW_NAMES: Record<string, string> = {
+  '18000': 'five_hour',
+  '604800': 'seven_day',
+  '5h': 'five_hour',
+  weekly: 'seven_day',
+};
+
+export function normalizeAgyWindow(window: string): string {
+  return AGY_WINDOW_NAMES[window] ?? window;
+}
+
 export type AgyUsageBucket = {
   id: string;
   name: string;
   window: string;
+  /** Normalized window identifier ('five_hour' | 'seven_day' | raw window). */
+  normalized_window: string;
   /** agy's own polarity: 1 = full headroom, 0 = exhausted. */
   remaining_fraction: number;
   /** Absolute ISO-8601, unlike Codex which reports seconds-until-reset. */
@@ -31,14 +47,38 @@ export type AgyUsageBucket = {
 
 export type AgyUsageGroup = {
   name: string;
+  /**
+   * Recognized model families drawing on this group (e.g. ['gemini'],
+   * ['argon'], or ['claude', 'gpt']).
+   */
+  families: AgyModelFamily[];
   /** Parsed from the group description; empty when agy stops emitting it. */
   models: string[];
   buckets: AgyUsageBucket[];
+  /** Five-hour rate limit window bucket, or null when the provider has none. */
+  five_hour: AgyUsageBucket | null;
+  /** Seven-day / weekly rate limit window bucket, or null when the provider has none. */
+  seven_day: AgyUsageBucket | null;
+};
+
+export type AgyFamilyUsage = {
+  family: AgyModelFamily;
+  group_name: string;
+  models: string[];
+  /** Five-hour rate limit window bucket, or null when the provider has none. */
+  five_hour: AgyUsageBucket | null;
+  /** Seven-day / weekly rate limit window bucket, or null when the provider has none. */
+  seven_day: AgyUsageBucket | null;
 };
 
 export type AgyUsage = {
   agent: 'agy';
   groups: AgyUsageGroup[];
+  /**
+   * Normalized view by model family. A missing quota window remains null
+   * (never synthetic 0 or 100%).
+   */
+  families: Record<AgyModelFamily, AgyFamilyUsage | null>;
 };
 
 export type GetAgyUsageOptions = {
@@ -91,9 +131,11 @@ export function parseAgyUsage(stdout: string): AgyUsage {
     if (!isJsonObject(data)) {
       throw new Error('Agy usage command_result is missing command.data');
     }
+    const groups = normalizeGroups(data.groups);
     return {
       agent: 'agy',
-      groups: normalizeGroups(data.groups),
+      groups,
+      families: buildFamilyMap(groups),
     };
   }
 
@@ -148,9 +190,7 @@ function runAgyUsageCommand(options: GetAgyUsageOptions): Promise<string> {
 
     const timer = setTimeout(() => {
       killChild();
-      finish(
-        new Error(`Agy usage command timed out after ${timeoutMs}ms`),
-      );
+      finish(new Error(`Agy usage command timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref?.();
 
@@ -199,10 +239,23 @@ function normalizeGroup(value: unknown, fieldName: string): AgyUsageGroup {
   if (!isJsonObject(value)) {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
+  const name = readString(value.name, `${fieldName}.name`);
+  const models = parseGroupModels(value.description, name);
+  const buckets = normalizeBuckets(value.buckets, `${fieldName}.buckets`);
+  const families = resolveAgyFamilies(name, value.description, buckets, models);
+
+  const fiveHour =
+    buckets.find((bucket) => bucket.normalized_window === 'five_hour') ?? null;
+  const sevenDay =
+    buckets.find((bucket) => bucket.normalized_window === 'seven_day') ?? null;
+
   return {
-    name: readString(value.name, `${fieldName}.name`),
-    models: parseGroupModels(value.description),
-    buckets: normalizeBuckets(value.buckets, `${fieldName}.buckets`),
+    name,
+    families,
+    models,
+    buckets,
+    five_hour: fiveHour,
+    seven_day: sevenDay,
   };
 }
 
@@ -219,6 +272,7 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
   if (!isJsonObject(value)) {
     throw new Error(`Agy usage field ${fieldName} must be an object`);
   }
+  const rawWindow = readString(value.window, `${fieldName}.window`);
   const remainingFraction = readFiniteNumber(
     value.remaining_fraction,
     `${fieldName}.remaining_fraction`,
@@ -226,7 +280,8 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
   return {
     id: readString(value.id, `${fieldName}.id`),
     name: typeof value.name === 'string' ? value.name : '',
-    window: readString(value.window, `${fieldName}.window`),
+    window: rawWindow,
+    normalized_window: normalizeAgyWindow(rawWindow),
     remaining_fraction: remainingFraction,
     reset_time: readString(value.reset_time, `${fieldName}.reset_time`),
     limit_reached: remainingFraction <= 0,
@@ -238,20 +293,94 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
  * The model list matters because quota is per group, so a gate has to know
  * which group the configured model draws on.
  */
-function parseGroupModels(value: unknown): string[] {
-  if (typeof value !== 'string') {
-    return [];
+function parseGroupModels(value: unknown, groupName?: string): string[] {
+  if (typeof value === 'string') {
+    const marker = 'Models within this group:';
+    const markerIndex = value.indexOf(marker);
+    if (markerIndex !== -1) {
+      return value
+        .slice(markerIndex + marker.length)
+        .split(',')
+        .map((model) => model.trim().replace(/\.$/, ''))
+        .filter(Boolean);
+    }
   }
-  const marker = 'Models within this group:';
-  const markerIndex = value.indexOf(marker);
-  if (markerIndex === -1) {
-    return [];
+  if (groupName && /argon/i.test(groupName)) {
+    return [groupName.trim()];
   }
-  return value
-    .slice(markerIndex + marker.length)
-    .split(',')
-    .map((model) => model.trim().replace(/\.$/, ''))
-    .filter(Boolean);
+  return [];
+}
+
+export function resolveAgyFamilies(
+  name: string,
+  description?: unknown,
+  buckets?: readonly { id?: string; name?: string }[],
+  models?: readonly string[],
+): AgyModelFamily[] {
+  const text = [
+    name,
+    typeof description === 'string' ? description : '',
+    ...(buckets?.map((b) => `${b.id ?? ''} ${b.name ?? ''}`) ?? []),
+    ...(models ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  const families: AgyModelFamily[] = [];
+
+  // Argon has separate quota on Pro plans and its own weekly bucket.
+  if (text.includes('argon')) {
+    families.push('argon');
+  } else if (text.includes('gemini')) {
+    families.push('gemini');
+  }
+
+  if (text.includes('claude')) {
+    families.push('claude');
+  }
+
+  if (text.includes('gpt')) {
+    families.push('gpt');
+  }
+
+  // agy pools 3p models under a shared quota group
+  if (
+    families.length === 0 &&
+    (text.includes('3p') ||
+      text.includes('third party') ||
+      text.includes('third-party'))
+  ) {
+    families.push('claude', 'gpt');
+  }
+
+  return families;
+}
+
+function buildFamilyMap(
+  groups: readonly AgyUsageGroup[],
+): Record<AgyModelFamily, AgyFamilyUsage | null> {
+  const result: Record<AgyModelFamily, AgyFamilyUsage | null> = {
+    gemini: null,
+    argon: null,
+    claude: null,
+    gpt: null,
+  };
+
+  for (const group of groups) {
+    for (const family of group.families) {
+      if (!result[family]) {
+        result[family] = {
+          family,
+          group_name: group.name,
+          models: group.models,
+          five_hour: group.five_hour,
+          seven_day: group.seven_day,
+        };
+      }
+    }
+  }
+
+  return result;
 }
 
 function readString(value: unknown, fieldName: string): string {
