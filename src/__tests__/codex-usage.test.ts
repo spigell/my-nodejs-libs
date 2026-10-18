@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { evaluateAgentUsage } from '../agents/agent-usage-evaluator.js';
 
 import {
   CODEX_CLI_OAUTH_CLIENT_ID,
@@ -78,6 +79,7 @@ void test('getCodexUsage fetches and validates live quota windows', async () => 
     'chatgpt-account-id': 'account-id',
   });
   assert.deepEqual(usage, { agent: 'codex', ...usageResponse });
+  assert.equal(evaluateAgentUsage('codex', usage, 'gpt-6-astra', { fiveHourMaxPercent: 80 }, null, Date.parse('2026-10-17T12:00:00Z')).reasonCode, 'available');
 });
 
 void test('getCodexUsage reads credentials from CODEX_HOME', async () => {

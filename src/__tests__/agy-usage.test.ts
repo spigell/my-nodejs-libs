@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { evaluateAgentUsage } from '../agents/agent-usage-evaluator.js';
+import { MODEL_SLUG_MAP } from '../agents/model-slugs.js';
 
 import {
   getAgyUsage,
@@ -180,6 +182,30 @@ const resultLine = JSON.stringify({
 });
 
 const stdout = `${commandResultLine}\n${resultLine}\n`;
+
+void test('evaluator accepts the captured raw agy sidecar body for every agy slug', () => {
+  const commandResult = JSON.parse(commandResultLine) as { command: { data: Record<string, unknown> } };
+  const raw: Record<string, unknown> = { agent: 'agy', ...commandResult.command.data };
+  const normalized = parseAgyUsage(stdout);
+  const slugs = Object.keys(MODEL_SLUG_MAP).filter((slug) =>
+    /^gemini-|^claude-(opus|sonnet)-5-5-(high|medium|low)$|^gpt-oss-120b-medium$/.test(slug));
+  assert.equal(slugs.length, 21);
+  const policy = { fiveHourMaxPercent: 80 };
+  const now = Date.parse('2026-10-17T12:00:00Z');
+  for (const slug of slugs) {
+    const actual = evaluateAgentUsage('agy', raw, slug, policy, null, now);
+    const expected = evaluateAgentUsage('agy', normalized, slug, policy, null, now);
+    assert.deepEqual(actual, expected, slug);
+    assert.equal(actual.reasonCode, 'available', slug);
+  }
+  for (const slug of ['gemini-3.8-flash-medium', 'gemini-4-argon-high', 'claude-opus-5-5-high']) {
+    assert.equal(evaluateAgentUsage('agy', raw, slug, policy, null, now).available, true, slug);
+  }
+  const malformed = structuredClone(raw);
+  const groups = malformed.groups as Array<{ buckets: Array<Record<string, unknown>> }>;
+  delete groups[0]!.buckets[0]!.reset_time;
+  assert.equal(evaluateAgentUsage('agy', malformed, 'gemini-3.8-flash-medium', policy, null, now).reasonCode, 'usage_unavailable');
+});
 
 const nodeEmitting = (text: string) => ({
   command: process.execPath,

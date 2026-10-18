@@ -132,17 +132,18 @@ export function parseAgyUsage(stdout: string): AgyUsage {
     if (!isJsonObject(data)) {
       throw new Error('Agy usage command_result is missing command.data');
     }
-    const groups = normalizeGroups(data.groups);
-    return {
-      agent: 'agy',
-      groups,
-      families: buildFamilyMap(groups),
-    };
+    return normalizeAgyUsageData(data);
   }
 
   throw new Error(
     'Agy usage output did not contain a command_result event line',
   );
+}
+
+/** Normalize the raw `/usage` body returned by the agy CLI. */
+export function normalizeAgyUsageData(data: Record<string, unknown>): AgyUsage {
+  const groups = normalizeGroups(data.groups);
+  return { agent: 'agy', groups, families: buildFamilyMap(groups) };
 }
 
 function runAgyUsageCommand(options: GetAgyUsageOptions): Promise<string> {
