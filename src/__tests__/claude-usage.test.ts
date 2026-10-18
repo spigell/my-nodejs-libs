@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { evaluateAgentUsage } from '../agents/agent-usage-evaluator.js';
 
 import {
   CLAUDE_USAGE_ENDPOINT,
@@ -149,6 +150,7 @@ void test('getClaudeUsage returns five-hour and weekly quota windows', async () 
       currency: 'USD',
     },
   });
+  assert.equal(evaluateAgentUsage('claude', usage, 'claude-opus-4-1', { fiveHourMaxPercent: 80 }, null, Date.parse('2026-07-24T12:00:00Z')).reasonCode, 'available');
 });
 
 void test('getClaudeUsage reads the Claude Code OAuth access token', async () => {

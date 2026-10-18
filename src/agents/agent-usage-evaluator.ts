@@ -1,4 +1,4 @@
-import { agyFamilyGroups, resolveAgyFamilies, type AgyModelFamily, type AgyUsage, type AgyUsageBucket, type AgyUsageGroup } from './agy-usage.js';
+import { agyFamilyGroups, normalizeAgyUsageData, resolveAgyFamilies, type AgyModelFamily, type AgyUsage, type AgyUsageBucket, type AgyUsageGroup } from './agy-usage.js';
 import type { ClaudeUsage, ClaudeUsageLimit, ClaudeUsageWindow } from './claude-usage.js';
 import type { CodexUsage } from './codex-usage.js';
 import { getModelSlugEntry } from './model-slugs.js';
@@ -119,7 +119,7 @@ export function weeklyPace(
   return { allowed, over: usedPercent === undefined || !finite(usedPercent) || usedPercent >= allowed };
 }
 
-/** Evaluates one normalized sidecar response for one registry agent and runner policy. */
+/** Evaluates one sidecar response for one registry agent and runner policy. */
 export function evaluateAgentUsage(
   adapter: AgentUsageKind,
   payload: unknown,
@@ -238,9 +238,18 @@ export function evaluateAgentUsage(
       if (applies) block('quota_limit', `${typed.kind} limit exhausted`);
     }
   } else if (adapter === 'agy') {
-    if (!agyPayload(root)) return verdict;
-    if ((root.groups as unknown[]).length === 0) return close('missing_window', 'No Agy quota groups');
-    const usage = payload as AgyUsage;
+    let usage: AgyUsage;
+    if (agyPayload(root)) {
+      usage = payload as AgyUsage;
+    } else {
+      if (root.families !== undefined) return verdict;
+      try {
+        usage = normalizeAgyUsageData(root);
+      } catch {
+        return verdict;
+      }
+    }
+    if (usage.groups.length === 0) return close('missing_window', 'No Agy quota groups');
     const groups = usage.groups;
     if (groups.some((group) => !object(group) || typeof group.name !== 'string' || !Array.isArray(group.buckets) ||
         (group.families != null && (!Array.isArray(group.families) || group.families.some((family) => typeof family !== 'string'))) ||
