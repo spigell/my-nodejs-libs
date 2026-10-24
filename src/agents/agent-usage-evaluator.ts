@@ -67,7 +67,8 @@ const agyBucket = (value: unknown): boolean => {
     typeof bucket.name === 'string' && typeof bucket.window === 'string' && !!bucket.window.trim() &&
     typeof bucket.normalized_window === 'string' && finite(bucket.remaining_fraction) &&
     bucket.remaining_fraction >= 0 && bucket.remaining_fraction <= 1 &&
-    typeof bucket.reset_time === 'string' && !!bucket.reset_time.trim() && typeof bucket.limit_reached === 'boolean';
+    (bucket.reset_time === null || (typeof bucket.reset_time === 'string' && !!bucket.reset_time.trim())) &&
+    typeof bucket.limit_reached === 'boolean';
 };
 const agyFamily = (value: unknown): boolean => {
   if (value === null) return true;
@@ -78,19 +79,20 @@ const agyFamily = (value: unknown): boolean => {
     (family.five_hour === null || agyBucket(family.five_hour)) &&
     (family.seven_day === null || agyBucket(family.seven_day));
 };
-const agyPayload = (root: Record<string, unknown>): boolean => {
-  const families = object(root.families);
-  return Array.isArray(root.groups) && root.groups.every((value: unknown) => {
-    const group = object(value);
-    return !!group && typeof group.name === 'string' && !!group.name.trim() &&
-      Array.isArray(group.families) && group.families.every((family: unknown) =>
-        ['gemini', 'argon', 'claude', 'gpt'].includes(family as string)) &&
-      Array.isArray(group.models) && group.models.every((model: unknown) => typeof model === 'string') &&
-      Array.isArray(group.buckets) && group.buckets.every(agyBucket) &&
-      (group.five_hour === null || agyBucket(group.five_hour)) &&
-      (group.seven_day === null || agyBucket(group.seven_day));
-  }) && !!families && ['gemini', 'argon', 'claude', 'gpt'].every((key) => agyFamily(families[key]));
+const agyGroup = (value: unknown): boolean => {
+  const group = object(value);
+  return !!group && typeof group.name === 'string' && !!group.name.trim() &&
+    Array.isArray(group.families) && group.families.every((family: unknown) =>
+      ['gemini', 'argon', 'claude', 'gpt'].includes(family as string)) &&
+    Array.isArray(group.models) && group.models.every((model: unknown) => typeof model === 'string') &&
+    Array.isArray(group.buckets) && group.buckets.every(agyBucket) &&
+    (group.five_hour === null || agyBucket(group.five_hour)) &&
+    (group.seven_day === null || agyBucket(group.seven_day));
 };
+const agyPayload = (root: Record<string, unknown>): boolean =>
+  Array.isArray(root.groups) && !!object(root.families) &&
+  ['gemini', 'argon', 'claude', 'gpt'].every((key) =>
+    Object.hasOwn(root.families as object, key));
 const validDate = (value: unknown): string | null => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
 const isoAfter = (now: number, seconds: unknown): string | null => {
   if (!finite(seconds)) return null;
@@ -250,13 +252,7 @@ export function evaluateAgentUsage(
       }
     }
     if (usage.groups.length === 0) return close('missing_window', 'No Agy quota groups');
-    const groups = usage.groups;
-    if (groups.some((group) => !object(group) || typeof group.name !== 'string' || !Array.isArray(group.buckets) ||
-        (group.families != null && (!Array.isArray(group.families) || group.families.some((family) => typeof family !== 'string'))) ||
-        (group.models != null && (!Array.isArray(group.models) || group.models.some((model) => typeof model !== 'string'))) ||
-        group.buckets.some((bucket) => !object(bucket) || typeof bucket.id !== 'string' ||
-          typeof bucket.name !== 'string' || typeof bucket.window !== 'string' ||
-          !finite(bucket.remaining_fraction) || typeof bucket.limit_reached !== 'boolean'))) return verdict;
+    const groups = usage.groups.filter(agyGroup);
     let fiveHour: AgyUsageBucket | null;
     let sevenDay: AgyUsageBucket | null;
     let weeklyOnly: boolean;
@@ -267,8 +263,9 @@ export function evaluateAgentUsage(
       group[kind] ?? group.buckets?.find((bucket) => bucket.normalized_window === kind ||
         (kind === 'five_hour' ? ['5h', '18000'] : ['weekly', '7d', '604800']).includes(bucket.window)) ?? null;
     if (groupName) {
-      const group = groups.find((candidate) => candidate.name.trim().toLowerCase() === groupName.toLowerCase());
+      const group = usage.groups.find((candidate) => object(candidate) && typeof candidate.name === 'string' && candidate.name.trim().toLowerCase() === groupName.toLowerCase());
       if (!group) return close('family_unobserved', 'Configured Agy group not observed');
+      if (!agyGroup(group)) return verdict;
       verdict.quotaFamily = group.name;
       weeklyOnly = familiesOf(group).length > 0 && familiesOf(group).every((family) => family === 'argon');
       fiveHour = windowOf(group, 'five_hour');
@@ -281,7 +278,10 @@ export function evaluateAgentUsage(
       verdict.quotaFamily = family;
       weeklyOnly = family === 'argon';
       const observed = usage.families?.[family];
+      if (!agyFamily(observed) || (observed && observed.family !== family)) return verdict;
       if (observed) {
+        const owner = usage.groups.find((group) => object(group) && group.name === observed.group_name);
+        if (!owner || !agyGroup(owner)) return verdict;
         fiveHour = observed.five_hour;
         sevenDay = observed.seven_day;
       } else {
