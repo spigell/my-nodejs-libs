@@ -596,7 +596,7 @@ void test('agy complete SUCCESS ends the run when the process hangs on shutdown'
       },
     },
     cwd: process.cwd(),
-    timeoutMs: 50,
+    timeoutMs: 10_000,
     resultExitGraceMs: 50,
     killGraceMs: 50,
     logger: {
