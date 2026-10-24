@@ -99,4 +99,11 @@ export type CliAdapter = {
   consumeEvent(state: EngineState, event: unknown): void;
   finalize(state: EngineState): EngineOutcome;
   inspectRawOutput?(args: RawOutputInspectionArgs): string | null;
+  /**
+   * True once the stream holds a complete successful result. The runner then
+   * stops waiting on the process: it gives the CLI a grace period to exit by
+   * itself, terminates it after that, and its exit status no longer fails the
+   * run. Lets a CLI that hangs or crashes on shutdown keep a finished turn.
+   */
+  hasCompletedResult?(state: EngineState): boolean;
 };

@@ -521,9 +521,24 @@ const agySuccess = JSON.stringify({
   result: { status: 'SUCCESS', response: 'partial answer' },
 });
 
-void test('agy exit 3 fails despite a parsed SUCCESS result', async () => {
+const agyEmptySuccess = JSON.stringify({
+  event: 'result',
+  result: { status: 'SUCCESS', response: '' },
+});
+
+const agyFailure = JSON.stringify({
+  event: 'result',
+  result: { status: 'ERROR' },
+});
+
+void test('agy exit 3 after a complete SUCCESS result returns it', async () => {
+  const result = await runAgyFixture([agySuccess], 3, 'shutdown crashed');
+  assert.equal(result.text, 'partial answer');
+});
+
+void test('agy exit 3 fails a SUCCESS result without a response', async () => {
   await assert.rejects(
-    runAgyFixture([agySuccess], 3, 'stream failed'),
+    runAgyFixture([agyEmptySuccess], 3, 'stream failed'),
     (error: Error) => {
       assert.match(error.message, /exit 3/);
       assert.match(error.message, /stream failed/);
@@ -535,7 +550,7 @@ void test('agy exit 3 fails despite a parsed SUCCESS result', async () => {
 void test('agy exit 3 preserves a bounded AGY_ERROR line', async () => {
   const diagnostic = `AGY_ERROR: ${'x'.repeat(12_000)}`;
   await assert.rejects(
-    runAgyFixture([agySuccess, diagnostic, 'z'.repeat(9_000)], 3),
+    runAgyFixture([agyFailure, diagnostic, 'z'.repeat(9_000)], 3),
     (error: Error) => {
       assert.match(error.message, /exit 3/);
       assert.match(error.message, /AGY_ERROR:/);
@@ -561,6 +576,41 @@ void test('agy quota exit fails without a terminal result', async () => {
 void test('agy exit 0 returns the parsed success', async () => {
   const result = await runAgyFixture([agySuccess], 0);
   assert.equal(result.text, 'partial answer');
+});
+
+void test('agy complete SUCCESS ends the run when the process hangs on shutdown', async () => {
+  const logged: string[] = [];
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter: {
+      ...agyAdapter,
+      buildCliArgs() {
+        return [
+          '-e',
+          [
+            "process.on('SIGTERM', () => {});",
+            `process.stdout.write(${JSON.stringify(`${agySuccess}\n`)});`,
+            'setInterval(() => undefined, 1000);',
+          ].join(''),
+        ];
+      },
+    },
+    cwd: process.cwd(),
+    timeoutMs: 10_000,
+    resultExitGraceMs: 50,
+    killGraceMs: 50,
+    logger: {
+      info(message) {
+        logged.push(message);
+      },
+    },
+  });
+
+  const result = await runner.run('fixture');
+
+  assert.equal(result.text, 'partial answer');
+  assert.ok(logged.includes('result_exit_timeout'));
+  assert.ok(logged.includes('spawn_kill'));
 });
 
 const codexSuccess = [
@@ -624,7 +674,7 @@ void test('a renamed agy wrapper retains its declared exit policy', async () => 
     adapter: {
       ...adapter,
       buildCliArgs() {
-        return ['-e', `process.stdout.write(${JSON.stringify(`${agySuccess}\n`)}); process.exit(3);`];
+        return ['-e', `process.stdout.write(${JSON.stringify(`${agyEmptySuccess}\n`)}); process.exit(3);`];
       },
     },
     cwd: process.cwd(),
@@ -689,6 +739,55 @@ void test('CliRunner timeout still applies to text-mode adapters', async () => {
   });
 
   await assert.rejects(runner.run('ignored'), /timed out after 50ms/);
+});
+
+void test('CliRunner sends SIGKILL when the process outlives the SIGTERM grace period', async () => {
+  const logged: string[] = [];
+  const controller = new AbortController();
+  const textAdapter: CliAdapter = {
+    name: 'text-stubborn',
+    outputMode: 'text',
+    buildCliArgs() {
+      return [
+        '-e',
+        [
+          "process.on('SIGTERM', () => {});",
+          "process.stdout.write('ready');",
+          'setInterval(() => undefined, 1000);',
+        ].join(''),
+      ];
+    },
+    consumeEvent() {},
+    finalize(state) {
+      return {
+        ok: true,
+        text: state.rawStdout.trim(),
+        usage: null,
+      };
+    },
+  };
+
+  const runner = new CliRunner({
+    command: process.execPath,
+    adapter: textAdapter,
+    cwd: process.cwd(),
+    killGraceMs: 100,
+    logger: {
+      info(message) {
+        logged.push(message);
+      },
+    },
+  });
+
+  // Abort only once the SIGTERM handler is installed, so SIGTERM is ignored.
+  await assert.rejects(
+    runner.run('ignored', {
+      signal: controller.signal,
+      onStdout: () => controller.abort(),
+    }),
+    /aborted/,
+  );
+  assert.ok(logged.includes('spawn_kill'));
 });
 
 void test('CliRunner propagates options and terminal permission denials', async () => {

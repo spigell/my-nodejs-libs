@@ -237,6 +237,17 @@ export const agyAdapter: CliAdapter = {
       }
     }
   },
+  // agy 1.4.x can deadlock during shutdown after a finished turn (upstream
+  // #1313), so a SUCCESS result with a response ends the run, not the exit.
+  hasCompletedResult(state: EngineState): boolean {
+    const result = asRecord(state.finalResult) as AgyResult | undefined;
+    return (
+      result !== undefined &&
+      isSuccessStatus(result.status) &&
+      typeof result.response === 'string' &&
+      result.response.trim() !== ''
+    );
+  },
   finalize(state: EngineState): EngineOutcome {
     const result = asRecord(state.finalResult) as AgyResult | undefined;
     if (!result) {
