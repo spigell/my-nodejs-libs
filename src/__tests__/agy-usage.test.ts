@@ -183,6 +183,18 @@ const resultLine = JSON.stringify({
 
 const stdout = `${commandResultLine}\n${resultLine}\n`;
 
+/** Derived from the captured agy 1.3.3 command_result: only the 3p-5h
+ * remaining fraction and reset are changed to the agy 1.4.7 reported case.
+ * The exact exhausted CLI reply was not available. */
+const exhausted3pReply = (missingReset = false): string => {
+  const captured = JSON.parse(commandResultLine) as { command: { data: { groups: Array<{ buckets: Array<Record<string, unknown>> }> } } };
+  const bucket = captured.command.data.groups[1]!.buckets[1]!;
+  bucket.remaining_fraction = 0;
+  if (missingReset) delete bucket.reset_time;
+  else bucket.reset_time = '';
+  return JSON.stringify(captured);
+};
+
 void test('evaluator accepts the captured raw agy sidecar body for every agy slug', () => {
   const commandResult = JSON.parse(commandResultLine) as { command: { data: Record<string, unknown> } };
   const raw: Record<string, unknown> = { agent: 'agy', ...commandResult.command.data };
@@ -203,8 +215,40 @@ void test('evaluator accepts the captured raw agy sidecar body for every agy slu
   }
   const malformed = structuredClone(raw);
   const groups = malformed.groups as Array<{ buckets: Array<Record<string, unknown>> }>;
-  delete groups[0]!.buckets[0]!.reset_time;
-  assert.equal(evaluateAgentUsage('agy', malformed, 'gemini-3.8-flash-medium', policy, null, now).reasonCode, 'usage_unavailable');
+  groups[0]!.buckets[0]!.reset_time = 42;
+  assert.equal(evaluateAgentUsage('agy', malformed, 'gemini-3.8-flash-medium', policy, null, now).reasonCode, 'missing_window');
+});
+
+void test('derived exhausted 3p-5h reply preserves Gemini and closes Claude/GPT', () => {
+  for (const missingReset of [false, true]) {
+    const usage = parseAgyUsage(exhausted3pReply(missingReset));
+    const bucket = usage.families.claude?.five_hour;
+    assert.equal(bucket?.remaining_fraction, 0);
+    assert.equal(bucket?.limit_reached, true);
+    assert.equal(bucket?.reset_time, null);
+    assert.equal(usage.families.gpt?.five_hour, bucket);
+    const policy = { fiveHourMaxPercent: 80 };
+    const now = Date.parse('2026-10-17T12:00:00Z');
+    for (const model of ['Gemini 3.8 Flash (High)', 'Gemini 4 Argon']) {
+      assert.equal(evaluateAgentUsage('agy', usage, model, policy, null, now).reasonCode, 'available');
+    }
+    for (const model of ['Claude Opus', 'GPT-OSS']) {
+      const verdict = evaluateAgentUsage('agy', usage, model, policy, null, now);
+      assert.equal(verdict.reasonCode, 'quota_limit');
+      assert.equal(verdict.fiveHourUsedPercent, 100);
+      assert.equal(verdict.fiveHourResetAt, null);
+    }
+  }
+});
+
+void test('malformed 3p bucket closes its family while the parsed Gemini family remains usable', () => {
+  const captured = JSON.parse(commandResultLine) as { command: { data: { groups: Array<{ buckets: Array<Record<string, unknown>> }> } } };
+  captured.command.data.groups[1]!.buckets[1]!.remaining_fraction = 'bad';
+  const usage = parseAgyUsage(JSON.stringify(captured));
+  const policy = { fiveHourMaxPercent: 80 };
+  const now = Date.parse('2026-10-17T12:00:00Z');
+  assert.equal(evaluateAgentUsage('agy', usage, 'Gemini 3.8 Flash (High)', policy, null, now).reasonCode, 'available');
+  assert.equal(evaluateAgentUsage('agy', usage, 'Claude Opus', policy, null, now).reasonCode, 'missing_window');
 });
 
 const nodeEmitting = (text: string) => ({
@@ -463,13 +507,24 @@ void test('parseAgyUsage leaves missing windows explicit and handles partial gro
   assert.equal(usage.families.gpt, null);
 });
 
-void test('parseAgyUsage rejects malformed data', () => {
+void test('parseAgyUsage isolates malformed groups and rejects malformed envelopes', () => {
   const assertParseError = (data: unknown, pattern: RegExp) => {
     const json = JSON.stringify({
       event: 'command_result',
       command: { name: 'usage', data },
     });
-    assert.throws(() => parseAgyUsage(json), pattern);
+    if (!data || typeof data !== 'object' || !('groups' in data) || !Array.isArray(data.groups)) {
+      assert.throws(() => parseAgyUsage(json), pattern);
+      return;
+    }
+    const usage = parseAgyUsage(json);
+    const group = data.groups[0] as { name?: string };
+    if (typeof group?.name === 'string' && group.name.trim()) {
+      assert.equal(usage.groups[0]?.name, group.name);
+      assert.deepEqual(usage.groups[0]?.buckets, []);
+    } else {
+      assert.deepEqual(usage.groups, []);
+    }
   };
 
   assertParseError({}, /groups must be an array/);
@@ -567,7 +622,7 @@ void test('parseAgyUsage rejects malformed data', () => {
         {
           name: 'G',
           buckets: [
-            { id: 'b', window: '5h', remaining_fraction: 1, reset_time: '' },
+            { id: 'b', window: '5h', remaining_fraction: 1, reset_time: 42 },
           ],
         },
       ],

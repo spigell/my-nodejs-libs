@@ -41,8 +41,8 @@ export type AgyUsageBucket = {
   normalized_window: string;
   /** agy's own polarity: 1 = full headroom, 0 = exhausted. */
   remaining_fraction: number;
-  /** Absolute ISO-8601, unlike Codex which reports seconds-until-reset. */
-  reset_time: string;
+  /** Absolute ISO-8601, or null when agy does not know the reset time. */
+  reset_time: string | null;
   limit_reached: boolean;
 };
 
@@ -234,7 +234,19 @@ function normalizeGroups(value: unknown): AgyUsageGroup[] {
   if (!Array.isArray(value)) {
     throw new Error('Agy usage field groups must be an array');
   }
-  return value.map((group, index) => normalizeGroup(group, `groups[${index}]`));
+  return value.flatMap((group, index) => {
+    try {
+      return [normalizeGroup(group, `groups[${index}]`)];
+    } catch {
+      // Keep a recognizable group as unobserved quota so its family closes,
+      // while other groups in the reply retain their valid windows.
+      if (!isJsonObject(group) || typeof group.name !== 'string' || !group.name.trim()) return [];
+      const models = parseGroupModels(group.description);
+      return [{ name: group.name, models,
+        families: resolveAgyFamilies(group.name, group.description, undefined, models),
+        buckets: [], five_hour: null, seven_day: null }];
+    }
+  });
 }
 
 function normalizeGroup(value: unknown, fieldName: string): AgyUsageGroup {
@@ -285,7 +297,8 @@ function normalizeBucket(value: unknown, fieldName: string): AgyUsageBucket {
     window: rawWindow,
     normalized_window: normalizeAgyWindow(rawWindow),
     remaining_fraction: remainingFraction,
-    reset_time: readString(value.reset_time, `${fieldName}.reset_time`),
+    reset_time: value.reset_time == null || value.reset_time === ''
+      ? null : readString(value.reset_time, `${fieldName}.reset_time`),
     limit_reached: remainingFraction <= 0,
   };
 }

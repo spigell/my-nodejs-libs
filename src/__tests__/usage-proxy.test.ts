@@ -147,6 +147,30 @@ void test('usage handler returns the native payload', async () => {
   });
 });
 
+void test('Agy proxy serves exhausted 3p bucket with unknown reset and keeps Gemini samples', async () => {
+  const fiveHour = { id: '3p-5h', name: 'Five Hour Limit Remaining', window: '5h',
+    normalized_window: 'five_hour', remaining_fraction: 0, reset_time: null, limit_reached: true };
+  const weekly = { ...fiveHour, id: '3p-weekly', window: 'weekly', normalized_window: 'seven_day',
+    remaining_fraction: 1, reset_time: '2026-10-24T12:20:07Z', limit_reached: false };
+  const gemini = { ...weekly, id: 'gemini-weekly', remaining_fraction: 0.9 };
+  const usage: AgentUsagePayload = { agent: 'agy', groups: [
+    { name: 'Gemini Models', families: ['gemini'], models: ['Gemini Flash'],
+      buckets: [gemini], five_hour: null, seven_day: gemini },
+    { name: 'Claude and GPT models', families: ['claude', 'gpt'], models: ['Claude Opus', 'GPT-OSS'],
+      buckets: [fiveHour, weekly], five_hour: fiveHour, seven_day: weekly },
+  ], families: { gemini: { family: 'gemini', group_name: 'Gemini Models', models: ['Gemini Flash'], five_hour: null, seven_day: gemini },
+    argon: null, claude: { family: 'claude', group_name: 'Claude and GPT models', models: ['Claude Opus', 'GPT-OSS'], five_hour: fiveHour, seven_day: weekly },
+    gpt: { family: 'gpt', group_name: 'Claude and GPT models', models: ['Claude Opus', 'GPT-OSS'], five_hour: fiveHour, seven_day: weekly } } };
+  const handler = createUsageHandler('agy', new CachedUsageLoader(() => Promise.resolve(usage), 1_000), silentLogging());
+  assert.deepEqual(await invoke(handler), { statusCode: 200, body: usage });
+  const samples = usageSamples(usage);
+  for (const scope of ['claude', 'gpt']) {
+    assert.deepEqual(samples.find((sample) => sample.scope === scope && sample.window === 'five_hour'),
+      { scope, window: 'five_hour', usedPercent: 100, resetsAt: undefined });
+  }
+  assert.equal(Math.round(samples.find((sample) => sample.scope === 'gemini')?.usedPercent ?? -1), 10);
+});
+
 void test('usage handler reports a retryable upstream failure as 502', async () => {
   const handler = createUsageHandler(
     'claude',
