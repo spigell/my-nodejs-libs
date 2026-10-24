@@ -24,6 +24,16 @@ export type CliRunnerArgs = {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /**
+   * How long the process gets to exit after SIGTERM before it is sent SIGKILL.
+   * Without it, a CLI that deadlocks on shutdown holds the run open forever.
+   */
+  killGraceMs?: number;
+  /**
+   * How long the process gets to exit by itself once the adapter reports a
+   * complete result, before it is terminated.
+   */
+  resultExitGraceMs?: number;
   logger?: CliRunnerLogger;
   /**
    * Called for each parsed event as it streams in, before the adapter sees it.
@@ -75,6 +85,8 @@ export type JsonlParser = {
 };
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_KILL_GRACE_MS = 30 * 1000;
+const DEFAULT_RESULT_EXIT_GRACE_MS = 30 * 1000;
 const OUTPUT_TAIL_LIMIT_BYTES = 8 * 1024;
 
 const defaultLogger: CliRunnerLogger = {
@@ -100,6 +112,9 @@ export class CliRunner {
     options?: CliRunOptions | string,
   ): Promise<ExecutionResult> {
     const timeoutMs = this.args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const killGraceMs = this.args.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+    const resultExitGraceMs =
+      this.args.resultExitGraceMs ?? DEFAULT_RESULT_EXIT_GRACE_MS;
     const start = Date.now();
     const logger = this.args.logger ?? defaultLogger;
     const normalizedOptions =
@@ -195,6 +210,22 @@ export class CliRunner {
     let killedByTimeout = false;
     let killedByAbortSignal = false;
     let abortReason: string | null = null;
+    let resultCompleted = false;
+    let killHandle: NodeJS.Timeout | undefined;
+    let resultExitHandle: NodeJS.Timeout | undefined;
+    // SIGTERM alone is not enough: a CLI that deadlocks while shutting down
+    // never exits, and the run would wait on it forever.
+    const terminate = (): void => {
+      child.kill('SIGTERM');
+      killHandle ??= setTimeout(() => {
+        logger.info('spawn_kill', {
+          command: this.args.command,
+          pid: child.pid ?? null,
+          grace_ms: killGraceMs,
+        });
+        child.kill('SIGKILL');
+      }, killGraceMs);
+    };
     const applyDiagnosticInspection = (
       stream: 'stdout' | 'stderr',
       text: string,
@@ -209,7 +240,7 @@ export class CliRunner {
       });
       if (inspectionError && !abortReason) {
         abortReason = inspectionError;
-        child.kill('SIGTERM');
+        terminate();
       }
     };
     const inspectDiagnostic = (
@@ -246,6 +277,22 @@ export class CliRunner {
                 }
               }
               this.args.adapter.consumeEvent(state, event);
+              if (
+                !resultCompleted &&
+                this.args.adapter.hasCompletedResult?.(state)
+              ) {
+                // The turn is done; only the process exit is outstanding.
+                resultCompleted = true;
+                clearTimeout(timeoutHandle);
+                resultExitHandle = setTimeout(() => {
+                  logger.info('result_exit_timeout', {
+                    command: this.args.command,
+                    pid: child.pid ?? null,
+                    grace_ms: resultExitGraceMs,
+                  });
+                  terminate();
+                }, resultExitGraceMs);
+              }
             },
             onInvalidLine: (line) => {
               parserWarnings.push(line);
@@ -265,13 +312,13 @@ export class CliRunner {
     const timeoutHandle = setTimeout(() => {
       killedByTimeout = true;
       stderr = `${this.args.command} timed out after ${timeoutMs}ms`;
-      child.kill('SIGTERM');
+      terminate();
     }, timeoutMs);
 
     const abortHandler = () => {
       killedByAbortSignal = true;
       abortReason = `${this.args.command} aborted`;
-      child.kill('SIGTERM');
+      terminate();
     };
 
     normalizedOptions.signal?.addEventListener('abort', abortHandler, {
@@ -292,7 +339,7 @@ export class CliRunner {
             error instanceof Error ? error.message : String(error);
           stderr = `${this.args.command} stream parse error: ${message}`;
           abortReason = stderr;
-          child.kill('SIGTERM');
+          terminate();
         }
       } else {
         inspectDiagnostic('stdout', text);
@@ -309,10 +356,18 @@ export class CliRunner {
       inspectDiagnostic('stderr', text);
     });
 
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      child.on('error', reject);
-      child.on('close', (code) => resolve(code ?? 1));
-    });
+    let exitCode: number;
+    try {
+      exitCode = await new Promise<number>((resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', (code) => resolve(code ?? 1));
+      });
+    } finally {
+      clearTimeout(timeoutHandle);
+      clearTimeout(killHandle);
+      clearTimeout(resultExitHandle);
+      normalizedOptions.signal?.removeEventListener('abort', abortHandler);
+    }
 
     logger.info('spawn_close', {
       command: this.args.command,
@@ -321,11 +376,9 @@ export class CliRunner {
       duration_ms: Date.now() - start,
       aborted: abortReason !== null,
       timed_out: killedByTimeout,
+      result_completed: resultCompleted,
       derived_session_id: state.sessionId ?? null,
     });
-
-    clearTimeout(timeoutHandle);
-    normalizedOptions.signal?.removeEventListener('abort', abortHandler);
 
     if (parser) {
       try {
@@ -371,8 +424,13 @@ export class CliRunner {
     }
 
     // A terminal event is not proof that the CLI exited successfully. An
-    // undeclared policy also fails closed for third-party adapters.
-    if (this.args.adapter.exitPolicy !== 'trust-result' && exitCode !== 0) {
+    // undeclared policy also fails closed for third-party adapters. A result
+    // the adapter declared complete is exempt: the runner may have killed it.
+    if (
+      !resultCompleted &&
+      this.args.adapter.exitPolicy !== 'trust-result' &&
+      exitCode !== 0
+    ) {
       const diagnosticLine = [
         ...state.rawStdout.split(/\r?\n/),
         ...stderr.split(/\r?\n/),
