@@ -3,7 +3,7 @@
   "extends": ["github>spigell/my-renovate"],
   "packageRules": [
     {
-      // typescript-eslint declares peer range typescript ">=4.8.4 <6.1.0"
+      "description": "typescript-eslint supports TypeScript only below 6.1.0 and TypeScript 7 breaks lint; source: https://github.com/typescript-eslint/typescript-eslint/issues/12518; review after: 2026-11-26",
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6.1.0"
     }
