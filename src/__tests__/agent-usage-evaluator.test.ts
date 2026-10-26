@@ -64,8 +64,8 @@ const fixtures: Fixture[] = [
   { name: 'Claude selected window missing reset', adapter: 'claude', payload: without(claude(), 'five_hour', 'resets_at'), reason: 'usage_unavailable' },
   { name: 'Claude unselected window missing reset', adapter: 'claude', payload: without(claude(), 'seven_day_opus', 'resets_at'), model: 'claude-sonnet-4', reason: 'usage_unavailable' },
   { name: 'Claude missing extra usage', adapter: 'claude', payload: without(claude(), 'extra_usage'), reason: 'usage_unavailable' },
-  { name: 'Malformed Agy', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: 'bad' }] }, reason: 'usage_unavailable' },
-  { name: 'Malformed Agy bucket', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: [{ id: 3 }] }] }, reason: 'usage_unavailable' },
+  { name: 'Malformed Agy', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: 'bad' }] }, reason: 'missing_window' },
+  { name: 'Malformed Agy bucket', adapter: 'agy', payload: { agent: 'agy', groups: [{ name: 'Gemini', buckets: [{ id: 3 }] }] }, reason: 'missing_window' },
   { name: 'Agy bucket missing reset', adapter: 'agy', payload: without(agy(), 'groups', '0', 'buckets', '0', 'reset_time'), reason: 'usage_unavailable' },
 ];
 for (const fixture of fixtures) void test(fixture.name, () => {
@@ -137,6 +137,27 @@ void test('Agy limit flag closes even with remaining fraction', () => {
   const payload = agy();
   payload.families.gemini.seven_day = { ...payload.families.gemini.seven_day, limit_reached: true };
   assert.equal(evaluateAgentUsage('agy', payload, undefined, policy, null, now).reasonCode, 'quota_limit');
+});
+
+void test('Agy null reset keeps exhausted family closed and healthy family available', () => {
+  const payload = agy();
+  const exhausted = { ...bucket('5h', 0), id: '3p-5h', reset_time: null, limit_reached: true };
+  const weekly = { ...bucket('weekly', 1), id: '3p-weekly' };
+  const group = { name: 'Claude and GPT models', families: ['claude', 'gpt'], models: ['Claude Opus', 'GPT-OSS'],
+    buckets: [exhausted, weekly], five_hour: exhausted, seven_day: weekly };
+  const families = { ...payload.families, claude: { family: 'claude', group_name: group.name, models: group.models, five_hour: exhausted, seven_day: weekly },
+    gpt: { family: 'gpt', group_name: group.name, models: group.models, five_hour: exhausted, seven_day: weekly } };
+  const usage = { ...payload, groups: [...payload.groups, group], families };
+  assert.equal(evaluateAgentUsage('agy', usage, 'Gemini 3.8 Flash (High)', policy, null, now).reasonCode, 'available');
+  const claude = evaluateAgentUsage('agy', usage, 'Claude Opus', policy, null, now);
+  assert.equal(claude.reasonCode, 'quota_limit');
+  assert.equal(claude.fiveHourResetAt, null);
+  assert.equal(claude.fiveHourUsedPercent, 100);
+  assert.equal(evaluateAgentUsage('agy', usage, 'GPT-OSS', policy, null, now).reasonCode, 'quota_limit');
+  const broken = structuredClone(usage) as Record<string, unknown>;
+  (broken.families as Record<string, unknown>).claude = { family: 'claude', five_hour: 'bad' };
+  assert.equal(evaluateAgentUsage('agy', broken, 'Gemini 3.8 Flash (High)', policy, null, now).reasonCode, 'available');
+  assert.equal(evaluateAgentUsage('agy', broken, 'Claude Opus', policy, null, now).reasonCode, 'usage_unavailable');
 });
 
 void test('unknown Claude model applies every active scoped limit', () => {
