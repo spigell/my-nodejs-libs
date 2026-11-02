@@ -1156,9 +1156,9 @@ negotiator@^1.0.0:
     content-type "^2.1.0"
 
 node-telegram-bot-api@^2.0.0:
-  version "2.1.0"
-  resolved "https://registry.yarnpkg.com/node-telegram-bot-api/-/node-telegram-bot-api-2.1.0.tgz#fc8a8143d0947574f7b1fd4ec463371e712ab586"
-  integrity sha512-IXWp7Qzhwv21DqTw0g1CcppTb4TCzrQ949RVdtAmgiHAu3KbcRPyCAFXLaFAViqWDVx8GLZjnWiWJ7pWSj2PRA==
+  version "2.2.0"
+  resolved "https://registry.yarnpkg.com/node-telegram-bot-api/-/node-telegram-bot-api-2.2.0.tgz#6ff98c069a3c401e2ea6e3c994c6472d8ea8c241"
+  integrity sha512-8h8430rjQEqNjIQD4nGyb1lBFSczIEg2wdiNiYhn+beuMsQuyPs6GIuNFPsC/Av7/flEn6xcPIbcGtN5uNXnrw==
 
 object-assign@^4:
   version "4.1.1"
