@@ -24,6 +24,8 @@ const createDeferred = (): Deferred => {
 
 class TestWebSocketWorker extends WebSocketWorker {
   public processedKinds: string[] = [];
+  public firstStarted = createDeferred();
+  public secondFinished = createDeferred();
   private deferred?: Deferred;
 
   constructor() {
@@ -45,7 +47,10 @@ class TestWebSocketWorker extends WebSocketWorker {
     this.processedKinds.push(message.kind);
     if (message.kind === 'first') {
       this.deferred = createDeferred();
+      this.firstStarted.resolve();
       await this.deferred.promise;
+    } else if (message.kind === 'second') {
+      this.secondFinished.resolve();
     }
   }
 
@@ -99,11 +104,11 @@ void test('WebSocketWorker processes the queued latest message after unlock', as
   const worker = new TestWebSocketWorker();
 
   worker.enqueueForTest({ kind: 'first', data: { id: 1 } });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await worker.firstStarted.promise;
   worker.enqueueForTest({ kind: 'second', data: { id: 2 } });
 
   worker.releaseFirstMessage();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await worker.secondFinished.promise;
 
   assert.deepEqual(worker.processedKinds, ['first', 'second']);
 });
