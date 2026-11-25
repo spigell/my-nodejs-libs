@@ -3,31 +3,33 @@ import assert from 'node:assert/strict';
 
 import { TelegramSender } from '../telegram/sender.js';
 
-void test('TelegramSender sends Markdown without link previews through the v2 API', async () => {
-  const originalFetch = globalThis.fetch;
+void test('TelegramSender sends Markdown without link previews through the v2 API', async (t) => {
   let requestUrl: string | undefined;
   let requestBody: URLSearchParams | undefined;
 
-  globalThis.fetch = (input, init) => {
-    requestUrl =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url;
-    assert.equal(init?.method, 'POST');
-    assert.ok(init?.body instanceof URLSearchParams);
-    requestBody = init.body;
-    return Promise.resolve(
-      new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }),
-    );
-  };
+  t.mock.method(
+    globalThis,
+    'fetch',
+    (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      requestUrl =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      assert.equal(init?.method, 'POST');
+      assert.ok(init?.body instanceof URLSearchParams);
+      requestBody = init.body;
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }),
+      );
+    },
+  );
 
-  try {
-    await new TelegramSender('test-token', '12345').send('*hello*');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  await new TelegramSender('test-token', '12345').send('*hello*');
 
   assert.equal(
     requestUrl,
