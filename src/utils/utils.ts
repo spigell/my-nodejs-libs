@@ -1,6 +1,6 @@
 export function chunk<T>(arr: T[], size: number): T[][] {
   if (!Number.isInteger(size) || size < 1) {
-    throw new Error('chunk size must be an integer of at least 1.');
+    throw new Error(`chunk size ${size} must be an integer of at least 1.`);
   }
 
   const result: T[][] = [];

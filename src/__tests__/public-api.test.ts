@@ -18,7 +18,9 @@ void test('chunk splits arrays into fixed-size groups', () => {
 
 void test('chunk rejects sizes that are not positive integers', () => {
   for (const size of [0, -1, NaN, 1.5, Infinity]) {
-    assert.throws(() => chunk([1, 2], size), /chunk size must be an integer of at least 1/);
+    assert.throws(() => chunk([1, 2], size), {
+      message: `chunk size ${size} must be an integer of at least 1.`,
+    });
   }
 });
 
