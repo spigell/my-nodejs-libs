@@ -3,38 +3,33 @@ import assert from 'node:assert/strict';
 
 import { RetryError, simple } from '../utils/retry.js';
 
-void test('simple retries with exponential backoff and returns attempt count', async () => {
+void test('simple retries with exponential backoff and returns attempt count', async (t) => {
   let attempts = 0;
-  const originalSetTimeout = globalThis.setTimeout;
   const delays: number[] = [];
 
-  globalThis.setTimeout = ((
+  t.mock.method(globalThis, 'setTimeout', ((
     callback: (...args: unknown[]) => void,
     delay?: number,
   ) => {
     delays.push(delay ?? 0);
     callback();
     return { ref() {}, unref() {} } as NodeJS.Timeout;
-  }) as typeof setTimeout;
+  }) as typeof setTimeout);
 
-  try {
-    const result = await simple(
-      () => {
-        attempts++;
-        if (attempts < 3) {
-          return Promise.reject(new Error(`fail ${attempts}`));
-        }
-        return Promise.resolve('ok');
-      },
-      3,
-      5,
-    );
+  const result = await simple(
+    () => {
+      attempts++;
+      if (attempts < 3) {
+        return Promise.reject(new Error(`fail ${attempts}`));
+      }
+      return Promise.resolve('ok');
+    },
+    3,
+    5,
+  );
 
-    assert.deepEqual(result, { result: 'ok', tries: 3 });
-    assert.deepEqual(delays, [5, 10]);
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
+  assert.deepEqual(result, { result: 'ok', tries: 3 });
+  assert.deepEqual(delays, [5, 10]);
 });
 
 void test('simple wraps the last error in RetryError', async () => {
