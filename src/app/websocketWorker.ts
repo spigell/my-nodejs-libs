@@ -193,7 +193,7 @@ export abstract class WebSocketWorker extends Worker {
 
       socket.isAlive = false;
       socket.ping(); // Send ping
-    }, 3000);
+    }, 30000);
   }
 
   /**

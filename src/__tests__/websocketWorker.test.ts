@@ -120,7 +120,9 @@ void test('stop on an open socket clears heartbeat and never reconnects', async 
   const socket = worker.sockets[0]!;
   socket.emit('open');
 
-  t.mock.timers.tick(3000);
+  t.mock.timers.tick(29999);
+  assert.equal(socket.pingCount, 0);
+  t.mock.timers.tick(1);
   assert.equal(socket.pingCount, 1);
 
   worker.stop();
