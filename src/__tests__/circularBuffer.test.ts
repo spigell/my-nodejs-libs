@@ -16,6 +16,22 @@ void test('CircularBuffer overwrites the oldest item in O(1) style order', () =>
   assert.deepEqual(buffer.getLast(2), [3, 4]);
 });
 
+void test('CircularBuffer returns stored undefined items', () => {
+  const buffer = new CircularBuffer<number | undefined>(3);
+
+  buffer.add(1);
+  buffer.add(undefined);
+  buffer.add(3);
+
+  assert.deepEqual(buffer.getLast(), [1, undefined, 3]);
+  assert.deepEqual(buffer.getLast(2), [undefined, 3]);
+
+  buffer.add(undefined);
+
+  assert.equal(buffer.size(), 3);
+  assert.deepEqual(buffer.getLast(), [undefined, 3, undefined]);
+});
+
 void test('CircularBuffer rejects zero-sized buffers', () => {
   assert.throws(() => new CircularBuffer<number>(0), /at least 1/i);
 });

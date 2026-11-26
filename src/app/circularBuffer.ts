@@ -31,10 +31,7 @@ export class CircularBuffer<T> {
 
     for (let index = 0; index < itemsToRead; index++) {
       const bufferIndex = (this.start + offset + index) % this.maxSize;
-      const item = this.buf[bufferIndex];
-      if (item !== undefined) {
-        result.push(item);
-      }
+      result.push(this.buf[bufferIndex] as T);
     }
 
     return result;
