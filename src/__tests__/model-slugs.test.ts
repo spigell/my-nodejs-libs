@@ -5,6 +5,7 @@ import {
   getModelSlugEntry,
   MODEL_SLUG_MAP,
   resolveAgyFamilies,
+  resolveModelSlug,
   type AgentRunnerPolicy,
   type AgyModelFamily,
 } from '../index.js';
@@ -336,6 +337,7 @@ const CODEX_SLUGS: readonly string[] = [
   'gpt-6-astra',
   'gpt-6-sol',
   'gpt-6-luna',
+  'gpt-6.1-terra',
   'gpt-reserve',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
@@ -623,6 +625,16 @@ for (const slug of CODEX_SLUGS) {
 }
 
 // --- 5. Helper function getModelSlugEntry tests ---
+void test('GPT-6.1 Terra resolves without changing GPT-5.6 Terra', () => {
+  const entry = MODEL_SLUG_MAP['gpt-6.1-terra'];
+  assert.ok(entry);
+  assert.equal(entry.slug, 'gpt-6.1-terra');
+  assert.equal(entry.family, null);
+  assert.equal(getModelSlugEntry('GPT-6.1 Terra')?.slug, 'gpt-6.1-terra');
+  assert.equal(resolveModelSlug('gpt-6.1-terra'), 'gpt-6.1-terra');
+  assert.equal(resolveModelSlug('gpt-5.6-terra'), 'gpt-5.6-terra');
+});
+
 void test('getModelSlugEntry resolves by slug and display name', () => {
   const bySlug = getModelSlugEntry('gemini-4-argon-high');
   assert.equal(bySlug?.slug, 'gemini-4-argon-high');
