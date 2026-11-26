@@ -26,11 +26,12 @@ export abstract class Worker {
   protected isLocked: boolean = false;
 
   /**
-   * Constructor to initialize the trader.
-   * @param name - Unique name of the trader instance.
-   * @param prom - Instance of Prometheus client for managing metrics.
-   * @param logging - Instance of logger for capturing logs.
-   * @param interval - Time interval (in ms) between successive trading operations.
+   * Constructor to initialize the worker and register its status metric.
+   * @param name - Unique name of the worker instance; used as the `worker` metric label and the logger `name` label.
+   * @param appId - Identifier of the owning application; used as the `app_id` metric label.
+   * @param prom - Metric registry used to register and update the worker's metrics.
+   * @param logging - Logger to clone for this worker's structured logs.
+   * @param config - Worker-specific configuration.
    */
   constructor(
     name: string,
