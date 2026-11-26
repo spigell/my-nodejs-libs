@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
 
-const DEFAULT_SHARED_GEMINI_HOME =
+const resolveSharedGeminiHome = () =>
   process.env.GEMINI_SHARED_HOME || path.join(os.homedir(), '.gemini');
-const DEFAULT_ISOLATED_HOME_ROOT =
+const resolveIsolatedHomeRoot = () =>
   process.env.GEMINI_ISOLATED_HOME_ROOT ||
   path.join(os.homedir(), '.agents-home');
 const DEFAULT_SHARED_STATE_FILES = (
@@ -37,10 +37,11 @@ export async function createGeminiIsolation(args: {
   const agentName = (process.env.AGENT_NAME || 'gemini').trim() || 'gemini';
   const toolName = args.toolName.trim() || 'tool';
   const isolatedHome = path.join(
-    DEFAULT_ISOLATED_HOME_ROOT,
+    resolveIsolatedHomeRoot(),
     agentName,
     toolName,
   );
+  const sharedGeminiHome = resolveSharedGeminiHome();
   const geminiDir = path.join(isolatedHome, '.gemini');
   const skillsDir = path.join(geminiDir, 'skills');
   const systemPromptPath = path.join(geminiDir, 'system.md');
@@ -61,7 +62,7 @@ export async function createGeminiIsolation(args: {
 
   await Promise.all(
     DEFAULT_SHARED_STATE_FILES.map(async (fileName) => {
-      const sourcePath = path.join(DEFAULT_SHARED_GEMINI_HOME, fileName);
+      const sourcePath = path.join(sharedGeminiHome, fileName);
       const targetPath = path.join(geminiDir, fileName);
       try {
         await fs.lstat(sourcePath);
