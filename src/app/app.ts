@@ -10,11 +10,9 @@ export type App = {
   status(): Promise<Status>;
 };
 
-const appVersion = process.env.APP_VERSION;
-
 export function appInfo() {
   return {
-    appVersion,
+    appVersion: process.env.APP_VERSION,
     environment: process.env.NODE_ENV,
     processId: process.pid,
   };
