@@ -68,7 +68,7 @@ yarn link "@spigell/my-nodejs-libs"
 
 ## Exported modules
 
-The package root exports everything from [src/index.ts](/project/my-shared-infra/my-nodejs-libs/src/index.ts), including:
+The package root exports everything from [src/index.ts](src/index.ts), including:
 
 - app: `Worker`, `PeriodicWorker`, `QueueWorker`, `WebSocketWorker`, `CircularBuffer`
 - HTTP: `Server`, `JsonAxiosInstance`
