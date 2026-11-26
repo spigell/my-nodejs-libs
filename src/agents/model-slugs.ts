@@ -387,6 +387,12 @@ export const MODEL_SLUG_MAP: Readonly<Record<string, ModelSlugEntry>> =
       usageNames: ['GPT-6 Luna', 'gpt-6-luna'],
       displayNames: ['GPT-6 Luna', 'gpt-6-luna'],
     },
+    'gpt-6.1-terra': {
+      slug: 'gpt-6.1-terra',
+      family: null,
+      usageNames: ['GPT-6.1 Terra', 'gpt-6.1-terra'],
+      displayNames: ['GPT-6.1 Terra', 'gpt-6.1-terra'],
+    },
     'gpt-reserve': {
       slug: 'gpt-reserve',
       family: null,
