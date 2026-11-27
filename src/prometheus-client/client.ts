@@ -544,9 +544,6 @@ export class PromClient {
         boundaries,
       };
       const existing = this.definitions.get(emittedName);
-      if (existing && JSON.stringify(existing) !== JSON.stringify(definition)) {
-        throw new ConflictingMetricDefinitionError(emittedName);
-      }
       if (existing) throw new ConflictingMetricDefinitionError(emittedName);
       const seriesLimit = validateSeriesLimit(
         options.seriesLimit ?? this.defaultSeriesLimit,
