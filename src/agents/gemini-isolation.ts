@@ -8,7 +8,7 @@ const resolveSharedGeminiHome = () =>
 const resolveIsolatedHomeRoot = () =>
   process.env.GEMINI_ISOLATED_HOME_ROOT ||
   path.join(os.homedir(), '.agents-home');
-const DEFAULT_SHARED_STATE_FILES = (
+const resolveSharedStateFiles = () => (
   process.env.GEMINI_SHARED_STATE_FILES ||
   'oauth_creds.json,mcp-oauth-tokens-v2.json,mcp-oauth-tokens.json,google_accounts.json,installation_id'
 )
@@ -61,7 +61,7 @@ export async function createGeminiIsolation(args: {
   }
 
   await Promise.all(
-    DEFAULT_SHARED_STATE_FILES.map(async (fileName) => {
+    resolveSharedStateFiles().map(async (fileName) => {
       const sourcePath = path.join(sharedGeminiHome, fileName);
       const targetPath = path.join(geminiDir, fileName);
       try {

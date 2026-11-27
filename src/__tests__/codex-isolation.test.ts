@@ -6,14 +6,42 @@ import test, { afterEach } from 'node:test';
 import { createCodexIsolation } from '../agents/codex-isolation.js';
 
 const originalCodexRoot = process.env.CODEX_ISOLATED_HOME_ROOT;
+const originalSharedStateFiles = process.env.CODEX_SHARED_STATE_FILES;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   process.env.CODEX_ISOLATED_HOME_ROOT = originalCodexRoot;
+  if (originalSharedStateFiles === undefined) {
+    delete process.env.CODEX_SHARED_STATE_FILES;
+  } else {
+    process.env.CODEX_SHARED_STATE_FILES = originalSharedStateFiles;
+  }
   await Promise.all(
     tempDirs
       .splice(0)
       .map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
+});
+
+void test('createCodexIsolation reads shared state files at call time', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-isolation-'));
+  tempDirs.push(tempRoot);
+  process.env.CODEX_ISOLATED_HOME_ROOT = tempRoot;
+  process.env.CODEX_SHARED_STATE_FILES = ' auth.json, custom-state.json ';
+  const sharedCodexHome = path.join(tempRoot, 'shared-codex-home');
+  await fs.mkdir(sharedCodexHome);
+  await fs.writeFile(path.join(sharedCodexHome, 'auth.json'), '{}');
+  const sharedFile = path.join(sharedCodexHome, 'custom-state.json');
+  await fs.writeFile(sharedFile, '{}');
+
+  const result = await createCodexIsolation({
+    toolName: 'custom-state',
+    sharedCodexHome,
+  });
+
+  assert.equal(
+    await fs.readlink(path.join(result.isolatedHome, 'custom-state.json')),
+    sharedFile,
   );
 });
 
