@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
+import { linkSharedStateFile } from './shared-state-link.js';
 
 const resolveSharedGeminiHome = () =>
   process.env.GEMINI_SHARED_HOME || path.join(os.homedir(), '.gemini');
@@ -64,40 +65,14 @@ export async function createGeminiIsolation(args: {
     resolveSharedStateFiles().map(async (fileName) => {
       const sourcePath = path.join(sharedGeminiHome, fileName);
       const targetPath = path.join(geminiDir, fileName);
-      try {
-        await fs.lstat(sourcePath);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT') {
-          if (fileName === 'oauth_creds.json') {
-            throw new Error(
-              `Missing required Gemini shared state file "${fileName}" at ${sourcePath}. ` +
-                'Gemini shared state could not be linked into the isolated home.',
-              { cause: error },
-            );
-          }
-          return;
-        }
-        throw error;
+      const missing = await linkSharedStateFile(sourcePath, targetPath);
+      if (missing && fileName === 'oauth_creds.json') {
+        throw new Error(
+          `Missing required Gemini shared state file "${fileName}" at ${sourcePath}. ` +
+            'Gemini shared state could not be linked into the isolated home.',
+          { cause: missing },
+        );
       }
-
-      try {
-        const existing = await fs.lstat(targetPath);
-        if (existing.isSymbolicLink()) {
-          const currentTarget = await fs.readlink(targetPath);
-          if (currentTarget === sourcePath) {
-            return;
-          }
-        }
-        await fs.rm(targetPath, { recursive: true, force: true });
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ENOENT') {
-          throw error;
-        }
-      }
-
-      await fs.symlink(sourcePath, targetPath);
     }),
   );
 
