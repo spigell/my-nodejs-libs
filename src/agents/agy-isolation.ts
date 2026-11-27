@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
+import { linkSharedStateFile } from './shared-state-link.js';
 
 export const DEFAULT_AGY_MODEL = 'Gemini 3.5 Flash (Medium)';
 const AGY_SHARED_OAUTH_TOKEN_PATH =
@@ -93,10 +94,7 @@ export async function createAgyIsolation(args: {
     );
   }
 
-  await syncOptionalSharedStateLink(
-    AGY_SHARED_OAUTH_TOKEN_PATH,
-    oauthTokenPath,
-  );
+  await linkSharedStateFile(AGY_SHARED_OAUTH_TOKEN_PATH, oauthTokenPath);
 
   return {
     env: {
@@ -162,39 +160,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPositiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
-}
-
-async function syncOptionalSharedStateLink(
-  sourcePath: string,
-  targetPath: string,
-): Promise<void> {
-  try {
-    await fs.lstat(sourcePath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  try {
-    const existing = await fs.lstat(targetPath);
-    if (existing.isSymbolicLink()) {
-      const currentTarget = await fs.readlink(targetPath);
-      if (currentTarget === sourcePath) {
-        return;
-      }
-    }
-    await fs.rm(targetPath, { recursive: true, force: true });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw error;
-    }
-  }
-
-  await fs.symlink(sourcePath, targetPath);
 }
 
 function resolveIsolatedHomeRoot(): string {

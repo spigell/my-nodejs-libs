@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { type SkillSource, syncIsolatedSkills } from './isolated-skills.js';
+import { linkSharedStateFile } from './shared-state-link.js';
 
 export type ClaudeIsolationContext = {
   env: NodeJS.ProcessEnv;
@@ -213,35 +214,12 @@ async function linkSharedCredentials(
   sourcePath: string,
   targetPath: string,
 ): Promise<void> {
-  try {
-    await fs.lstat(sourcePath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      throw new Error(
-        `Missing required Claude shared credentials at ${sourcePath}. ` +
-          'Claude authentication could not be linked into the isolated config directory.',
-        { cause: error },
-      );
-    }
-    throw error;
+  const missing = await linkSharedStateFile(sourcePath, targetPath);
+  if (missing) {
+    throw new Error(
+      `Missing required Claude shared credentials at ${sourcePath}. ` +
+        'Claude authentication could not be linked into the isolated config directory.',
+      { cause: missing },
+    );
   }
-
-  try {
-    const existing = await fs.lstat(targetPath);
-    if (existing.isSymbolicLink()) {
-      const currentTarget = await fs.readlink(targetPath);
-      if (currentTarget === sourcePath) {
-        return;
-      }
-    }
-    await fs.rm(targetPath, { recursive: true, force: true });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw error;
-    }
-  }
-
-  await fs.symlink(sourcePath, targetPath);
 }
