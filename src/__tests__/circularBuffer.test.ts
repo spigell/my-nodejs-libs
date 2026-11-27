@@ -32,6 +32,10 @@ void test('CircularBuffer returns stored undefined items', () => {
   assert.deepEqual(buffer.getLast(), [undefined, 3, undefined]);
 });
 
-void test('CircularBuffer rejects zero-sized buffers', () => {
-  assert.throws(() => new CircularBuffer<number>(0), /at least 1/i);
+void test('CircularBuffer requires a positive finite integer capacity', () => {
+  for (const maxSize of [-1, 0, 0.5, 1.5, NaN, Infinity, -Infinity]) {
+    assert.throws(() => new CircularBuffer<number>(maxSize), /positive finite integer/i);
+  }
+
+  assert.equal(new CircularBuffer<number>(1).size(), 0);
 });
