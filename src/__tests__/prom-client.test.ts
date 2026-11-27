@@ -26,6 +26,12 @@ void test('PromClient preserves legacy observable metric behavior', async () => 
     });
   }, /Duplicate metric registration/);
   assert.match((await client.collect()).body, /requests_active\{kind="a"\} 3/);
+
+  client.createCounter({ name: 'jobs', help: 'Jobs' });
+  assert.throws(
+    () => client.createCounter({ name: 'jobs', help: 'Jobs' }),
+    ConflictingMetricDefinitionError,
+  );
   await client.shutdown();
 });
 
