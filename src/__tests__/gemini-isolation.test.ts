@@ -8,16 +8,44 @@ import { createGeminiIsolation } from '../agents/gemini-isolation.js';
 const originalSharedHome = process.env.GEMINI_SHARED_HOME;
 const originalIsolatedRoot = process.env.GEMINI_ISOLATED_HOME_ROOT;
 const originalAgentName = process.env.AGENT_NAME;
+const originalSharedStateFiles = process.env.GEMINI_SHARED_STATE_FILES;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   process.env.GEMINI_SHARED_HOME = originalSharedHome;
   process.env.GEMINI_ISOLATED_HOME_ROOT = originalIsolatedRoot;
   process.env.AGENT_NAME = originalAgentName;
+  if (originalSharedStateFiles === undefined) {
+    delete process.env.GEMINI_SHARED_STATE_FILES;
+  } else {
+    process.env.GEMINI_SHARED_STATE_FILES = originalSharedStateFiles;
+  }
   await Promise.all(
     tempDirs
       .splice(0)
       .map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
+});
+
+void test('createGeminiIsolation reads shared state files at call time', async () => {
+  const tempRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'gemini-isolation-'),
+  );
+  tempDirs.push(tempRoot);
+  const sharedHome = path.join(tempRoot, 'shared-gemini');
+  process.env.GEMINI_SHARED_HOME = sharedHome;
+  process.env.GEMINI_ISOLATED_HOME_ROOT = path.join(tempRoot, 'isolated');
+  process.env.GEMINI_SHARED_STATE_FILES = ' oauth_creds.json, custom-state.json ';
+  await fs.mkdir(sharedHome);
+  await fs.writeFile(path.join(sharedHome, 'oauth_creds.json'), '{}');
+  const sharedFile = path.join(sharedHome, 'custom-state.json');
+  await fs.writeFile(sharedFile, '{}');
+
+  const result = await createGeminiIsolation({ toolName: 'custom-state' });
+
+  assert.equal(
+    await fs.readlink(path.join(result.geminiDir, 'custom-state.json')),
+    sharedFile,
   );
 });
 

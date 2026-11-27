@@ -58,7 +58,7 @@ const resolveSharedCodexHome = () =>
   process.env.CODEX_HOME ||
   path.join(os.homedir(), '.codex');
 
-const DEFAULT_SHARED_CODEX_STATE_FILES = (
+const resolveSharedCodexStateFiles = () => (
   process.env.CODEX_SHARED_STATE_FILES ||
   'auth.json,.credentials.json,installation_id'
 )
@@ -236,7 +236,7 @@ export async function createCodexIsolation(args: {
   await linkSharedStateFiles(
     args.sharedCodexHome ?? resolveSharedCodexHome(),
     isolatedHome,
-    args.sharedStateFiles ?? DEFAULT_SHARED_CODEX_STATE_FILES,
+    args.sharedStateFiles ?? resolveSharedCodexStateFiles(),
   );
   await writeRoleConfigs(
     path.join(isolatedHome, 'roles'),
