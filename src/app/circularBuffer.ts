@@ -4,8 +4,8 @@ export class CircularBuffer<T> {
   private length = 0;
 
   constructor(private readonly maxSize: number) {
-    if (maxSize < 1) {
-      throw new Error('CircularBuffer maxSize must be at least 1.');
+    if (!Number.isInteger(maxSize) || maxSize < 1) {
+      throw new Error('CircularBuffer maxSize must be a positive finite integer.');
     }
     this.buf = new Array<T | undefined>(maxSize);
   }
