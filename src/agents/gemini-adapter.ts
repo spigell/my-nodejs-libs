@@ -87,7 +87,7 @@ function normalizeError(input: unknown, defaultMessage: string): string {
 
   if (input && typeof input === 'object') {
     const obj = input as Record<string, unknown>;
-    if (typeof obj.message === 'string') {
+    if (typeof obj.message === 'string' && obj.message.trim()) {
       return obj.message.trim();
     }
   }
