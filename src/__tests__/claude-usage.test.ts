@@ -436,6 +436,24 @@ void test('getClaudeUsage reports API errors without exposing credentials', asyn
   );
 });
 
+void test('getClaudeUsage keeps the HTTP status when the error body cannot be read', async () => {
+  const response = new Response('ignored', { status: 503 });
+  Object.defineProperty(response, 'text', {
+    value: () => Promise.reject(new Error('stream reset')),
+  });
+  await assert.rejects(
+    getClaudeUsage({
+      accessToken: 'secret-token',
+      fetch: () => Promise.resolve(response),
+    }),
+    (error: unknown) => {
+      assert.match(String(error), /HTTP 503/);
+      assert.doesNotMatch(String(error), /stream reset/);
+      return true;
+    },
+  );
+});
+
 function requestUrl(input: Parameters<typeof globalThis.fetch>[0]): string {
   return typeof input === 'string'
     ? input

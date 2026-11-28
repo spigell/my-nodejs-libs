@@ -610,7 +610,12 @@ function normalizeNullableString(
 }
 
 async function readResponseError(response: Response): Promise<string> {
-  const text = (await response.text()).trim();
+  let text: string;
+  try {
+    text = (await response.text()).trim();
+  } catch {
+    return '';
+  }
   if (!text) {
     return '';
   }
