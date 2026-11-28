@@ -78,6 +78,41 @@ void test('geminiAdapter finalizes text and token usage from JSONL events', () =
   });
 });
 
+function finalizeGeminiResult(result: Record<string, unknown>) {
+  const state: EngineState = {
+    finalResult: null,
+    lastAssistantText: '',
+    rawStdout: '',
+    rawStderr: '',
+  };
+  geminiAdapter.consumeEvent(state, { type: 'result', ...result });
+  return geminiAdapter.finalize(state);
+}
+
+void test('geminiAdapter reports the error message and type on failure', () => {
+  assert.deepEqual(
+    finalizeGeminiResult({
+      is_error: true,
+      error: { message: 'boom', type: 'X' },
+    }),
+    { ok: false, error: 'boom', errorType: 'X' },
+  );
+});
+
+void test('geminiAdapter falls back to the default error for a blank message', () => {
+  assert.deepEqual(
+    finalizeGeminiResult({ is_error: true, error: { message: '  ' } }),
+    { ok: false, error: 'Gemini command failed' },
+  );
+});
+
+void test('geminiAdapter falls back to the default error when none is reported', () => {
+  assert.deepEqual(finalizeGeminiResult({ status: 'failed' }), {
+    ok: false,
+    error: 'Gemini command failed',
+  });
+});
+
 void test('claudeAdapter defaults to strict MCP configuration', () => {
   const readOnlyTools = [
     'Read',
