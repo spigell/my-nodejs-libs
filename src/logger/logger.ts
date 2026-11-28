@@ -106,7 +106,6 @@ export class Logging {
       level: level,
       format: format.combine(
         format.timestamp({ format: timestampFormat }),
-        format.json(),
         format.printf((info) => {
           const rawInfo: Record<string, unknown> = isRecord(info) ? info : {};
           const timestamp =
@@ -119,17 +118,15 @@ export class Logging {
             typeof rawInfo.message === 'string'
               ? rawInfo.message
               : inspect(rawInfo.message, { depth: 0, breakLength: Infinity });
-          const data = sanitizeMeta({
-            ...rawInfo,
-          });
-          delete data.timestamp;
-          delete data.level;
-          delete data.message;
+          const rest: Record<string, unknown> = { ...rawInfo };
+          delete rest.timestamp;
+          delete rest.level;
+          delete rest.message;
           const response = {
             timestamp,
             level,
             message,
-            data: sanitizeMeta({ ...data, ...this.labels }),
+            data: sanitizeMeta({ ...rest, ...this.labels }),
           };
           return JSON.stringify(response);
         }),

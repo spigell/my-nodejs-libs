@@ -146,3 +146,36 @@ void test('structured logs merge labels into data and redact sensitive labels', 
     credentials: '[REDACTED]',
   });
 });
+
+void test('direct getLogger() calls still get labels and redaction from the formatter', () => {
+  const { logging, records } = captureLogging();
+  logging.setLabel('service', 'billing');
+  logging.setLabel('token', 'label-secret');
+
+  logging
+    .getLogger()
+    .info('direct', { requestId: 'r-1', password: 'meta-secret' });
+
+  const [record] = records();
+  assert.ok(record);
+  assert.deepEqual(Object.keys(record), [
+    'timestamp',
+    'level',
+    'message',
+    'data',
+  ]);
+  assert.equal(record.level, 'info');
+  assert.equal(record.message, 'direct');
+  assert.deepEqual(record.data, {
+    requestId: 'r-1',
+    password: '[REDACTED]',
+    service: 'billing',
+    token: '[REDACTED]',
+  });
+  assert.deepEqual(Object.keys(record.data), [
+    'requestId',
+    'password',
+    'service',
+    'token',
+  ]);
+});
